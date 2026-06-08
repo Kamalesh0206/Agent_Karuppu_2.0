@@ -109,18 +109,33 @@ export default function Login() {
           </button>
         </form>
 
-        <div style={{ marginTop: '1.5rem', textAlign: 'center', fontSize: '0.875rem' }}>
-          <span style={{ color: 'var(--text-muted)' }}>Don't have an account? </span>
-          <a
-            href="/signup"
-            onClick={(e) => {
-              e.preventDefault()
-              navigate('/signup')
-            }}
-            style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: 600 }}
-          >
-            Sign up
-          </a>
+        <div style={{ marginTop: '1.5rem', textAlign: 'center', fontSize: '0.875rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <div>
+            <span style={{ color: 'var(--text-muted)' }}>Don't have an account? </span>
+            <a
+              href="/signup"
+              onClick={(e) => {
+                e.preventDefault()
+                navigate('/signup')
+              }}
+              style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: 600 }}
+            >
+              Sign up
+            </a>
+          </div>
+          <div>
+            <span style={{ color: 'var(--text-muted)' }}>Registered but not verified? </span>
+            <a
+              href="/verify"
+              onClick={(e) => {
+                e.preventDefault()
+                navigate('/verify')
+              }}
+              style={{ color: 'var(--accent-cyan)', textDecoration: 'none', fontWeight: 600 }}
+            >
+              Verify OTP
+            </a>
+          </div>
         </div>
       </div>
     </div>

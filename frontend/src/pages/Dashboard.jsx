@@ -7,7 +7,7 @@ const API_BASE = "http://localhost:8000"
 export default function Dashboard() {
   const { user } = useAuth()
   
-  // Post states
+  // Post Composer states
   const [caption, setCaption] = useState('')
   const [hashtags, setHashtags] = useState('')
   const [selectedAccounts, setSelectedAccounts] = useState([])
@@ -65,7 +65,6 @@ export default function Dashboard() {
     setSuccess('')
     setUploading(true)
 
-    // Check media type
     const fileType = file.type
     const isVideo = fileType.startsWith('video/')
     setIsMediaVideo(isVideo)
@@ -141,9 +140,9 @@ export default function Dashboard() {
         throw new Error(data.detail || 'Failed to trigger publishing')
       }
 
-      setSuccess('Publishing sequence initiated! AI Content Agent, Publishing Agent, and Monitoring Agents are now processing your request in the background.')
+      setSuccess('Publishing sequence initiated successfully in the background!')
       
-      // Clear form
+      // Clear form composer fields
       setCaption('')
       setHashtags('')
       setSelectedAccounts([])
@@ -161,19 +160,18 @@ export default function Dashboard() {
 
   const getStatusBadgeClass = (status) => {
     switch (status) {
-      case 'SUCCESS': return 'badge-success'
-      case 'PENDING': return 'badge-pending'
-      case 'IN_PROGRESS': return 'badge-progress'
-      case 'FAILED': return 'badge-danger'
+      case 'Success': return 'badge-success'
+      case 'Pending': return 'badge-pending'
+      case 'Failed': return 'badge-danger'
       default: return 'badge-pending'
     }
   }
 
   const getStatusIcon = (status) => {
     switch (status) {
-      case 'SUCCESS': return <CheckCircle2 size={12} />
-      case 'FAILED': return <XCircle size={12} />
-      case 'IN_PROGRESS': return <RefreshCw size={12} className="spinner" style={{ animationDuration: '2s' }} />
+      case 'Success': return <CheckCircle2 size={12} />
+      case 'Failed': return <XCircle size={12} />
+      case 'Pending': return <RefreshCw size={12} className="spinner" style={{ animationDuration: '2s' }} />
       default: return <AlertCircle size={12} />
     }
   }
@@ -183,7 +181,7 @@ export default function Dashboard() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
         <div>
           <h1 style={{ fontSize: '2rem', marginBottom: '0.25rem' }}>Dashboard</h1>
-          <p style={{ color: 'var(--text-muted)' }}>Publish your content to multiple feeds at once.</p>
+          <p style={{ color: 'var(--text-muted)' }}>Upload and schedule posts across connected Instagram feeds.</p>
         </div>
       </div>
 
@@ -208,7 +206,7 @@ export default function Dashboard() {
             
             {/* Upload Area */}
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <span className="form-label">Media Attachment</span>
+              <span className="form-label">Media Attachment (Mandatory)</span>
               <input
                 type="file"
                 ref={fileInputRef}
@@ -224,7 +222,7 @@ export default function Dashboard() {
                     <p style={{ fontSize: '0.875rem', fontWeight: 600 }}>Upload Image or Video</p>
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Drag & drop or click to browse</p>
                   </div>
-                  <span style={{ fontSize: '0.675rem', color: 'var(--text-muted)' }}>Supported: JPG, PNG, MP4, MOV (Max 50MB)</span>
+                  <span style={{ fontSize: '0.675rem', color: 'var(--text-muted)' }}>Supported: JPG, PNG, MP4, MOV</span>
                 </div>
               ) : (
                 <div className="preview-container">
@@ -254,13 +252,13 @@ export default function Dashboard() {
 
             {/* Caption Textarea */}
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" htmlFor="caption">Caption</label>
+              <label className="form-label" htmlFor="caption">Caption (Optional)</label>
               <textarea
                 id="caption"
                 className="form-input"
                 rows={4}
                 style={{ resize: 'vertical' }}
-                placeholder="Enter caption. The AI Content agent will refine and polish this to maximize user engagement."
+                placeholder="Enter caption. The AI Content agent will refine and polish this to maximize engagement."
                 value={caption}
                 onChange={(e) => setCaption(e.target.value)}
               />
@@ -268,12 +266,12 @@ export default function Dashboard() {
 
             {/* Hashtags input */}
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" htmlFor="hashtags">Hashtags</label>
+              <label className="form-label" htmlFor="hashtags">Hashtags (Optional)</label>
               <input
                 id="hashtags"
                 type="text"
                 className="form-input"
-                placeholder="#instagram #marketing (Content Agent will add optimized recommendations)"
+                placeholder="#instagram #marketing"
                 value={hashtags}
                 onChange={(e) => setHashtags(e.target.value)}
               />
@@ -297,11 +295,11 @@ export default function Dashboard() {
                       <input
                         type="checkbox"
                         checked={selectedAccounts.includes(acc.id)}
-                        onChange={() => {}} // Controlled by click wrapper
+                        onChange={() => {}}
                         style={{ cursor: 'pointer' }}
                       />
                       <span style={{ fontSize: '0.8125rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        @{acc.username}
+                        @{acc.instagram_username}
                       </span>
                     </div>
                   ))}
@@ -342,7 +340,6 @@ export default function Dashboard() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
                       <div style={{ width: '42px', height: '42px', borderRadius: '6px', overflow: 'hidden', background: '#000', border: '1px solid rgba(255,255,255,0.1)' }}>
-                        {/* Load simple placeholder if path not serveable, otherwise static serve URL */}
                         {post.media_path.toLowerCase().endsWith('.mp4') || post.media_path.toLowerCase().endsWith('.mov') ? (
                           <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#111' }}><Video size={16} /></div>
                         ) : (
@@ -358,31 +355,22 @@ export default function Dashboard() {
                         <span style={{ fontSize: '0.675rem', color: 'var(--text-muted)' }}>
                           {new Date(post.created_at).toLocaleString()}
                         </span>
-                        <p style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-main)', maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <p style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-main)', maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {post.caption || "No caption"}
                         </p>
                       </div>
                     </div>
+                    
+                    <span className={`badge ${getStatusBadgeClass(post.publish_status)}`}>
+                      {getStatusIcon(post.publish_status)}
+                      {post.publish_status}
+                    </span>
                   </div>
 
-                  {/* Destination statuses */}
-                  <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.5rem' }}>
-                    <span style={{ fontSize: '0.675rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.35rem' }}>Publishing status per account:</span>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                      {post.destinations.map(dest => (
-                        <div 
-                          key={dest.id} 
-                          title={dest.error_message || `Status: ${dest.publish_status}`}
-                          style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', background: 'rgba(0,0,0,0.2)', padding: '0.25rem 0.5rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.05)' }}
-                        >
-                          <span style={{ fontSize: '0.75rem', fontWeight: 500 }}>@{dest.account_username}</span>
-                          <span className={`badge ${getStatusBadgeClass(dest.publish_status)}`} style={{ padding: '2px 4px', fontSize: '0.65rem' }}>
-                            {getStatusIcon(dest.publish_status)}
-                            {dest.publish_status}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
+                  {/* Destination info */}
+                  <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Target Account:</span>
+                    <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--primary)' }}>@{post.instagram_username}</span>
                   </div>
                 </div>
               ))

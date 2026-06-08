@@ -75,8 +75,18 @@ export default function Logs() {
                 >
                   [{log.action}]
                 </span>
+                {log.username && (
+                  <span style={{ color: 'var(--primary)', marginRight: '0.5rem', fontWeight: 600 }}>
+                    @{log.username}
+                  </span>
+                )}
+                {log.ip_address && (
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginRight: '0.5rem', fontFamily: 'monospace' }}>
+                    ({log.ip_address})
+                  </span>
+                )}
                 <span style={{ color: '#e5e7eb' }}>
-                  {log.message}
+                  {log.description}
                 </span>
               </div>
             ))

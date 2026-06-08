@@ -2,16 +2,16 @@ import os
 import logging
 from .celery_app import celery_app
 from .database import SessionLocal
-from .models import Post, Account, PostAccount, Log
+from .models import Post, InstagramAccount, Log
 from .crew.crew import InstagramPublishingCrew
 
 logger = logging.getLogger("celery_tasks")
 
 @celery_app.task(name="app.tasks.publish_post_task", bind=True)
-def publish_post_task(self, post_id: int, account_ids: list[int]):
+def publish_post_task(self, post_id: int):
     """
-    Celery background task that handles the post verification, 
-    content optimization, publishing, and monitoring via CrewAI.
+    Celery background task that handles post optimization, 
+    publishing, and monitoring for a specific Post record.
     """
     logger.info(f"Starting Celery background job for post ID {post_id}")
     db = SessionLocal()
@@ -25,40 +25,37 @@ def publish_post_task(self, post_id: int, account_ids: list[int]):
             return {"status": "error", "message": error_msg}
 
         # 2. Fetch Account details
-        accounts = db.query(Account).filter(Account.id.in_(account_ids)).all()
-        if not accounts:
-            error_msg = f"Task aborted: No valid accounts found for IDs: {account_ids}."
+        account = db.query(InstagramAccount).filter(InstagramAccount.id == post.instagram_account_id).first()
+        if not account:
+            error_msg = f"Task aborted: Instagram Account ID {post.instagram_account_id} not found."
             logger.error(error_msg)
-            
-            # Mark all post account jobs as failed
-            db.query(PostAccount).filter(
-                PostAccount.post_id == post_id
-            ).update({"publish_status": "FAILED", "error_message": error_msg})
+            post.publish_status = "Failed"
             db.commit()
             return {"status": "error", "message": error_msg}
 
-        # Format accounts metadata for CrewAI input
-        accounts_info = []
-        for acc in accounts:
-            # Only include ACTIVE accounts in verification details
-            if acc.status == "ACTIVE":
-                accounts_info.append({
-                    "id": acc.id,
-                    "username": acc.username
-                })
-            else:
-                # Update status of inactive accounts to FAILED
-                post_acc = db.query(PostAccount).filter(
-                    PostAccount.post_id == post_id,
-                    PostAccount.account_id == acc.id
-                ).first()
-                if post_acc:
-                    post_acc.publish_status = "FAILED"
-                    post_acc.error_message = f"Account {acc.username} is INACTIVE. Publishing skipped."
-                    db.commit()
+        if account.status != "ACTIVE":
+            error_msg = f"Task aborted: Instagram Account @{account.instagram_username} is INACTIVE."
+            logger.error(error_msg)
+            post.publish_status = "Failed"
+            db.commit()
+            
+            # Log deactivation skip
+            db.add(Log(
+                user_id=post.user_id,
+                action="PUBLISH_SKIP",
+                description=f"Publishing skipped for post {post_id}. Account @{account.instagram_username} is inactive."
+            ))
+            db.commit()
+            return {"status": "error", "message": error_msg}
 
-        if not accounts_info:
-            return {"status": "error", "message": "No active accounts selected."}
+        # Mark status as Pending / In Progress
+        post.publish_status = "Pending"
+        db.commit()
+
+        accounts_info = [{
+            "id": account.id,
+            "username": account.instagram_username
+        }]
 
         # 3. Detect if media is a video (based on file extension)
         video_extensions = [".mp4", ".mov", ".avi", ".mkv"]
@@ -74,36 +71,36 @@ def publish_post_task(self, post_id: int, account_ids: list[int]):
             
             # Start Log
             db.add(Log(
+                user_id=post.user_id,
                 action="CREW_START",
-                message=f"[SIMULATION] Mock Agent execution started for post {post_id}. Accounts: {[a['username'] for a in accounts_info]}"
+                description=f"[SIMULATION] Mock Agent execution started for post {post_id}. Target account: @{account.instagram_username}"
             ))
             db.commit()
 
             # Content Agent Simulation
             db.add(Log(
+                user_id=post.user_id,
                 action="AGENT_OPTIMIZE",
-                message=f"[Content Agent] [SIMULATION] Validated media file and caption length. Caption enhanced and hashtags optimized: {post.hashtags or ''} #instagram #viral #ai"
+                description=f"[Content Agent] [SIMULATION] Validated media file and caption length. Caption enhanced and hashtags optimized: {post.hashtags or ''} #instagram #viral #ai"
             ))
             db.commit()
 
-            # Publishing Agent Simulation (Runs the real tool logic directly, ensuring mock publishing works)
+            # Publishing Agent Simulation
             from .crew.tools import publish_to_instagram
-            results = []
-            for acc in accounts_info:
-                tool_result = publish_to_instagram.fn(
-                    post_id=post_id,
-                    account_id=acc["id"],
-                    caption=f"{post.caption or ''} {post.hashtags or ''} #instagram #viral #ai",
-                    media_path=post.media_path,
-                    is_video=is_video
-                )
-                results.append(tool_result)
+            tool_result = publish_to_instagram.fn(
+                post_id=post_id,
+                account_id=account.id,
+                caption=f"{post.caption or ''} {post.hashtags or ''} #instagram #viral #ai",
+                media_path=post.media_path,
+                is_video=is_video
+            )
 
             # Monitoring Agent Simulation
-            report = f"Mock Agent Simulation Completed.\nTotal Targets: {len(accounts_info)}\nDetails:\n" + "\n".join(results)
+            report = f"Mock Agent Simulation Completed. Details:\n{tool_result}"
             db.add(Log(
+                user_id=post.user_id,
                 action="CREW_SUCCESS",
-                message=f"[SIMULATION] Mock Agent workflow completed. Summary: {report[:500]}"
+                description=f"[SIMULATION] Mock Agent workflow completed. Summary: {report[:500]}"
             ))
             db.commit()
 
@@ -113,12 +110,13 @@ def publish_post_task(self, post_id: int, account_ids: list[int]):
                 "report": report
             }
 
-        logger.info(f"Initializing CrewAI workflow. Target Accounts count: {len(accounts_info)}")
+        logger.info(f"Initializing CrewAI workflow. Target Account: @{account.instagram_username}")
         
         # Write initial system audit log
         start_log = Log(
+            user_id=post.user_id,
             action="CREW_START",
-            message=f"CrewAI execution started for post {post_id}. Accounts: {[a['username'] for a in accounts_info]}"
+            description=f"CrewAI execution started for post {post_id}. Target account: @{account.instagram_username}"
         )
         db.add(start_log)
         db.commit()
@@ -137,8 +135,9 @@ def publish_post_task(self, post_id: int, account_ids: list[int]):
         
         # Log crew final report
         end_log = Log(
+            user_id=post.user_id,
             action="CREW_SUCCESS",
-            message=f"CrewAI execution completed. Analytics Summary: {crew_report[:1000]}"
+            description=f"CrewAI execution completed. Summary: {crew_report[:1000]}"
         )
         db.add(end_log)
         db.commit()
@@ -155,19 +154,16 @@ def publish_post_task(self, post_id: int, account_ids: list[int]):
         
         # Write error log
         err_log = Log(
+            user_id=post.user_id,
             action="CREW_FAILURE",
-            message=f"Celery task encountered an unhandled exception: {str(e)}"
+            description=f"Celery task encountered an unhandled exception: {str(e)}"
         )
         db.add(err_log)
         
-        # Update any pending or in-progress post-accounts to failed
-        db.query(PostAccount).filter(
-            PostAccount.post_id == post_id,
-            PostAccount.publish_status.in_(["PENDING", "IN_PROGRESS"])
-        ).update({
-            "publish_status": "FAILED", 
-            "error_message": f"Unhandled worker failure: {str(e)}"
-        }, synchronize_session=False)
+        # Update post status to Failed
+        post = db.query(Post).filter(Post.id == post_id).first()
+        if post:
+            post.publish_status = "Failed"
         db.commit()
 
         return {"status": "error", "message": f"Task execution failed: {str(e)}"}

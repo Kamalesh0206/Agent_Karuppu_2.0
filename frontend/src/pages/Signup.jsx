@@ -1,13 +1,16 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { KeyRound, User, UserPlus, Shield } from 'lucide-react'
+import { KeyRound, User, UserPlus, Mail, Phone, FileText } from 'lucide-react'
 
 const API_BASE = "http://localhost:8000"
 
 export default function Signup() {
+  const [fullName, setFullName] = useState('')
+  const [email, setEmail] = useState('')
+  const [mobileNumber, setMobileNumber] = useState('')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [role, setRole] = useState('user')
+  
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
@@ -17,14 +20,20 @@ export default function Signup() {
     setError('')
     setLoading(true)
 
-    if (username.length < 3) {
-      setError('Username must be at least 3 characters long')
+    if (fullName.trim().length < 3) {
+      setError('Full Name must be at least 3 characters long.')
+      setLoading(false)
+      return
+    }
+
+    if (username.trim().length < 3) {
+      setError('Username must be at least 3 characters long.')
       setLoading(false)
       return
     }
 
     if (password.length < 5) {
-      setError('Password must be at least 5 characters long')
+      setError('Password must be at least 5 characters long.')
       setLoading(false)
       return
     }
@@ -33,16 +42,22 @@ export default function Signup() {
       const response = await fetch(`${API_BASE}/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password, role })
+        body: JSON.stringify({
+          full_name: fullName.trim(),
+          email: email.trim(),
+          mobile_number: mobileNumber.trim(),
+          username: username.trim(),
+          password: password
+        })
       })
 
       const data = await response.json()
       if (!response.ok) {
-        throw new Error(data.detail || 'Registration failed')
+        throw new Error(data.detail || 'Registration failed.')
       }
 
-      // Redirect back to login with success state
-      navigate('/login', { state: { message: `Successfully registered ${username}! You can now sign in.` } })
+      // Redirect to verification OTP page, passing the username
+      navigate('/verify', { state: { username: username.trim() } })
     } catch (err) {
       setError(err.message)
     } finally {
@@ -52,11 +67,11 @@ export default function Signup() {
 
   return (
     <div className="login-page">
-      <div className="glass-card login-card">
+      <div className="glass-card login-card" style={{ maxWidth: '460px' }}>
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
           <div className="logo-icon" style={{ margin: '0 auto 1rem', width: '56px', height: '56px', fontSize: '1.75rem' }}>📸</div>
-          <h1 style={{ fontSize: '1.75rem', marginBottom: '0.5rem' }}>IG Multi-Publisher</h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Create an account to manage your feeds</p>
+          <h1 style={{ fontSize: '1.75rem', marginBottom: '0.5rem' }}>Platform Registration</h1>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Create an account to join the publishing platform</p>
         </div>
 
         {error && (
@@ -66,6 +81,57 @@ export default function Signup() {
         )}
 
         <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label className="form-label" htmlFor="fullname">Full Name</label>
+            <div style={{ position: 'relative' }}>
+              <FileText size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input
+                id="fullname"
+                type="text"
+                required
+                className="form-input"
+                style={{ paddingLeft: '2.5rem' }}
+                placeholder="Enter your full name"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="email">Email Address</label>
+            <div style={{ position: 'relative' }}>
+              <Mail size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input
+                id="email"
+                type="email"
+                required
+                className="form-input"
+                style={{ paddingLeft: '2.5rem' }}
+                placeholder="Enter email address"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="mobile">Mobile Number</label>
+            <div style={{ position: 'relative' }}>
+              <Phone size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input
+                id="mobile"
+                type="text"
+                required
+                className="form-input"
+                style={{ paddingLeft: '2.5rem' }}
+                placeholder="Enter mobile number"
+                value={mobileNumber}
+                onChange={(e) => setMobileNumber(e.target.value)}
+              />
+            </div>
+          </div>
+
           <div className="form-group">
             <label className="form-label" htmlFor="username">Username</label>
             <div style={{ position: 'relative' }}>
@@ -100,23 +166,6 @@ export default function Signup() {
             </div>
           </div>
 
-          <div className="form-group">
-            <label className="form-label" htmlFor="role">Account Role</label>
-            <div style={{ position: 'relative' }}>
-              <Shield size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-              <select
-                id="role"
-                className="form-input"
-                style={{ paddingLeft: '2.5rem', appearance: 'none', background: 'rgba(0, 0, 0, 0.3) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 4 5\'%3E%3Cpath fill=\'%239ca3af\' d=\'M2 0L0 2h4zm0 5L0 3h4z\'/%3E%3C/svg%3E") no-repeat right 12px center/8px 10px' }}
-                value={role}
-                onChange={(e) => setRole(e.target.value)}
-              >
-                <option value="user" style={{ backgroundColor: '#090714', color: 'white' }}>User (Publish & View Only)</option>
-                <option value="admin" style={{ backgroundColor: '#090714', color: 'white' }}>Admin (Full Access & Account Setup)</option>
-              </select>
-            </div>
-          </div>
-
           <button
             type="submit"
             className="btn btn-primary"
@@ -125,7 +174,7 @@ export default function Signup() {
           >
             {loading ? <div className="spinner"></div> : (
               <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'center' }}>
-                <UserPlus size={18} /> Register Account
+                <UserPlus size={18} /> Register & Verify
               </span>
             )}
           </button>

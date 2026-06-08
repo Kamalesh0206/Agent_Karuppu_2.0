@@ -1,6 +1,6 @@
 import datetime
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 # User Schemas
 class UserLogin(BaseModel):
@@ -8,18 +8,42 @@ class UserLogin(BaseModel):
     password: str
 
 class UserCreate(BaseModel):
+    full_name: str
+    email: EmailStr
+    mobile_number: str
     username: str
     password: str
-    role: Optional[str] = "user"  # admin, user
+
+class VerifyOTPRequest(BaseModel):
+    username: str
+    email_otp: str
+    mobile_otp: str
 
 class UserResponse(BaseModel):
     id: int
+    full_name: str
+    email: str
+    mobile_number: str
     username: str
     role: str
+    status: str
+    email_verified: bool
+    mobile_verified: bool
+    publishing_permission: bool
     created_at: datetime.datetime
+    updated_at: datetime.datetime
 
     class Config:
         from_attributes = True
+
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    mobile_number: Optional[str] = None
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
 
 # Token Schemas
 class Token(BaseModel):
@@ -27,24 +51,22 @@ class Token(BaseModel):
     token_type: str
     username: str
     role: str
+    status: str
 
 class TokenData(BaseModel):
     username: Optional[str] = None
     role: Optional[str] = None
 
-# Account Schemas
-class AccountCreate(BaseModel):
-    username: str
+# Instagram Account Schemas
+class InstagramAccountCreate(BaseModel):
+    instagram_username: str
     access_token: str
+    refresh_token: Optional[str] = None
 
-class AccountUpdate(BaseModel):
-    username: Optional[str] = None
-    access_token: Optional[str] = None
-    status: Optional[str] = None  # ACTIVE, INACTIVE
-
-class AccountResponse(BaseModel):
+class InstagramAccountResponse(BaseModel):
     id: int
-    username: str
+    user_id: int
+    instagram_username: str
     status: str
     created_at: datetime.datetime
     updated_at: datetime.datetime
@@ -52,42 +74,50 @@ class AccountResponse(BaseModel):
     class Config:
         from_attributes = True
 
-# Post Schemas
+# Instagram Credential Update Request Schemas
+class CredentialUpdateRequestCreate(BaseModel):
+    instagram_account_id: Optional[int] = None
+    requested_username: str
+    requested_password: Optional[str] = None
+    requested_access_token: str
+    requested_refresh_token: Optional[str] = None
+    reason: str
+
+class CredentialUpdateRequestProcess(BaseModel):
+    status: str  # "Approved", "Rejected"
+    admin_comments: Optional[str] = None
+
+class CredentialUpdateRequestResponse(BaseModel):
+    id: int
+    user_id: int
+    instagram_account_id: Optional[int] = None
+    requested_username: str
+    status: str
+    reason: str
+    admin_comments: Optional[str] = None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+    class Config:
+        from_attributes = True
+
+# Post / Publishing Schemas
 class PublishRequest(BaseModel):
-    caption: str
-    hashtags: str
+    caption: Optional[str] = ""
+    hashtags: Optional[str] = ""
     account_ids: List[int]
-    media_path: str  # Path returned from /upload-media
+    media_path: str
 
 class PostResponse(BaseModel):
     id: int
+    user_id: int
+    instagram_account_id: int
+    instagram_username: Optional[str] = None
     media_path: str
     caption: Optional[str] = None
     hashtags: Optional[str] = None
-    created_at: datetime.datetime
-
-    class Config:
-        from_attributes = True
-
-class PostAccountResponse(BaseModel):
-    id: int
-    post_id: int
-    account_id: int
-    account_username: str
     publish_status: str
-    published_at: Optional[datetime.datetime] = None
-    error_message: Optional[str] = None
-
-    class Config:
-        from_attributes = True
-
-class PostDetailResponse(BaseModel):
-    id: int
-    media_path: str
-    caption: Optional[str] = None
-    hashtags: Optional[str] = None
     created_at: datetime.datetime
-    destinations: List[PostAccountResponse]
 
     class Config:
         from_attributes = True
@@ -95,8 +125,11 @@ class PostDetailResponse(BaseModel):
 # Log Schemas
 class LogResponse(BaseModel):
     id: int
+    user_id: Optional[int] = None
+    username: Optional[str] = None
     action: str
-    message: str
+    description: str
+    ip_address: Optional[str] = None
     created_at: datetime.datetime
 
     class Config:

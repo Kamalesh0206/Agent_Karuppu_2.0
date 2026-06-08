@@ -1,5 +1,5 @@
 import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from .database import Base
 
@@ -7,54 +7,92 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
+    full_name = Column(String, nullable=False)
+    email = Column(String, unique=True, index=True, nullable=False)
+    mobile_number = Column(String, unique=True, index=True, nullable=False)
     username = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
-    role = Column(String, default="user", nullable=False)  # admin, user
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    role = Column(String, default="User", nullable=False)  # "Super Admin", "User"
+    status = Column(String, default="Pending Approval", nullable=False)  # "Pending Approval", "Approved", "Rejected", "Deactivated"
+    email_verified = Column(Boolean, default=False, nullable=False)
+    mobile_verified = Column(Boolean, default=False, nullable=False)
+    publishing_permission = Column(Boolean, default=True, nullable=False)
+    
+    # OTP fields (stored temporarily for registration verification verification)
+    email_otp = Column(String, nullable=True)
+    mobile_otp = Column(String, nullable=True)
 
-class Account(Base):
-    __tablename__ = "accounts"
-
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True, nullable=False)
-    access_token = Column(Text, nullable=False)  # Encrypted using Fernet
-    status = Column(String, default="ACTIVE", nullable=False)  # ACTIVE, INACTIVE
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
     # Relationships
-    post_accounts = relationship("PostAccount", back_populates="account", cascade="all, delete-orphan")
+    accounts = relationship("InstagramAccount", back_populates="user", cascade="all, delete-orphan")
+    requests = relationship("CredentialUpdateRequest", back_populates="user", cascade="all, delete-orphan")
+    posts = relationship("Post", back_populates="user", cascade="all, delete-orphan")
+    logs = relationship("Log", back_populates="user")
+
+class InstagramAccount(Base):
+    __tablename__ = "instagram_accounts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    instagram_username = Column(String, nullable=False)
+    access_token = Column(Text, nullable=False)  # Encrypted
+    refresh_token = Column(Text, nullable=True)   # Encrypted
+    status = Column(String, default="ACTIVE", nullable=False)  # "ACTIVE", "INACTIVE"
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", back_populates="accounts")
+    posts = relationship("Post", back_populates="instagram_account", cascade="all, delete-orphan")
+    requests = relationship("CredentialUpdateRequest", back_populates="instagram_account", cascade="all, delete-orphan")
+
+class CredentialUpdateRequest(Base):
+    __tablename__ = "credential_update_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    instagram_account_id = Column(Integer, ForeignKey("instagram_accounts.id", ondelete="SET NULL"), nullable=True)
+    requested_username = Column(String, nullable=False)
+    requested_password = Column(String, nullable=True)
+    requested_access_token = Column(Text, nullable=False)
+    requested_refresh_token = Column(Text, nullable=True)
+    reason = Column(Text, nullable=False)
+    status = Column(String, default="Pending", nullable=False)  # "Pending", "Approved", "Rejected"
+    admin_comments = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", back_populates="requests")
+    instagram_account = relationship("InstagramAccount", back_populates="requests")
 
 class Post(Base):
     __tablename__ = "posts"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    instagram_account_id = Column(Integer, ForeignKey("instagram_accounts.id", ondelete="CASCADE"), nullable=False)
     media_path = Column(String, nullable=False)
     caption = Column(Text, nullable=True)
     hashtags = Column(Text, nullable=True)
+    publish_status = Column(String, default="Pending", nullable=False)  # "Pending", "Success", "Failed"
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     # Relationships
-    post_accounts = relationship("PostAccount", back_populates="post", cascade="all, delete-orphan")
-
-class PostAccount(Base):
-    __tablename__ = "post_accounts"
-
-    id = Column(Integer, primary_key=True, index=True)
-    post_id = Column(Integer, ForeignKey("posts.id", ondelete="CASCADE"), nullable=False)
-    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False)
-    publish_status = Column(String, default="PENDING", nullable=False)  # PENDING, IN_PROGRESS, SUCCESS, FAILED
-    published_at = Column(DateTime, nullable=True)
-    error_message = Column(Text, nullable=True)
-
-    # Relationships
-    post = relationship("Post", back_populates="post_accounts")
-    account = relationship("Account", back_populates="post_accounts")
+    user = relationship("User", back_populates="posts")
+    instagram_account = relationship("InstagramAccount", back_populates="posts")
 
 class Log(Base):
     __tablename__ = "logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    action = Column(String, nullable=False)  # e.g., "USER_LOGIN", "CREATE_ACCOUNT", "PUBLISH_START", "AGENT_OPTIMIZE"
-    message = Column(Text, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    action = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    ip_address = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", back_populates="logs")
