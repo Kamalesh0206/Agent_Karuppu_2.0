@@ -1,41 +1,48 @@
 import React, { useState } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
-import { useAuth } from '../App'
-import { KeyRound, User } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { KeyRound, User, UserPlus, Shield } from 'lucide-react'
 
 const API_BASE = "http://localhost:8000"
 
-export default function Login() {
+export default function Signup() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [role, setRole] = useState('user')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const { login } = useAuth()
   const navigate = useNavigate()
-  const location = useLocation()
-  
-  // Retrieve success message from navigation state
-  const successMessage = location.state?.message
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
     setLoading(true)
 
+    if (username.length < 3) {
+      setError('Username must be at least 3 characters long')
+      setLoading(false)
+      return
+    }
+
+    if (password.length < 5) {
+      setError('Password must be at least 5 characters long')
+      setLoading(false)
+      return
+    }
+
     try {
-      const response = await fetch(`${API_BASE}/login`, {
+      const response = await fetch(`${API_BASE}/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ username, password, role })
       })
 
       const data = await response.json()
       if (!response.ok) {
-        throw new Error(data.detail || 'Authentication failed')
+        throw new Error(data.detail || 'Registration failed')
       }
 
-      login(data)
-      navigate('/dashboard')
+      // Redirect back to login with success state
+      navigate('/login', { state: { message: `Successfully registered ${username}! You can now sign in.` } })
     } catch (err) {
       setError(err.message)
     } finally {
@@ -49,14 +56,8 @@ export default function Login() {
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
           <div className="logo-icon" style={{ margin: '0 auto 1rem', width: '56px', height: '56px', fontSize: '1.75rem' }}>📸</div>
           <h1 style={{ fontSize: '1.75rem', marginBottom: '0.5rem' }}>IG Multi-Publisher</h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Sign in to manage and automate your feeds</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Create an account to manage your feeds</p>
         </div>
-
-        {successMessage && !error && (
-          <div style={{ background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '0.75rem 1rem', borderRadius: '8px', color: '#34d399', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
-            {successMessage}
-          </div>
-        )}
 
         {error && (
           <div style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '0.75rem 1rem', borderRadius: '8px', color: '#f87171', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
@@ -75,7 +76,7 @@ export default function Login() {
                 required
                 className="form-input"
                 style={{ paddingLeft: '2.5rem' }}
-                placeholder="Enter username"
+                placeholder="Choose username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
               />
@@ -92,10 +93,27 @@ export default function Login() {
                 required
                 className="form-input"
                 style={{ paddingLeft: '2.5rem' }}
-                placeholder="Enter password"
+                placeholder="Choose password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="role">Account Role</label>
+            <div style={{ position: 'relative' }}>
+              <Shield size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <select
+                id="role"
+                className="form-input"
+                style={{ paddingLeft: '2.5rem', appearance: 'none', background: 'rgba(0, 0, 0, 0.3) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 4 5\'%3E%3Cpath fill=\'%239ca3af\' d=\'M2 0L0 2h4zm0 5L0 3h4z\'/%3E%3C/svg%3E") no-repeat right 12px center/8px 10px' }}
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+              >
+                <option value="user" style={{ backgroundColor: '#090714', color: 'white' }}>User (Publish & View Only)</option>
+                <option value="admin" style={{ backgroundColor: '#090714', color: 'white' }}>Admin (Full Access & Account Setup)</option>
+              </select>
             </div>
           </div>
 
@@ -105,21 +123,25 @@ export default function Login() {
             style={{ width: '100%', padding: '0.85rem', marginTop: '1rem' }}
             disabled={loading}
           >
-            {loading ? <div className="spinner"></div> : 'Access Portal'}
+            {loading ? <div className="spinner"></div> : (
+              <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'center' }}>
+                <UserPlus size={18} /> Register Account
+              </span>
+            )}
           </button>
         </form>
 
         <div style={{ marginTop: '1.5rem', textAlign: 'center', fontSize: '0.875rem' }}>
-          <span style={{ color: 'var(--text-muted)' }}>Don't have an account? </span>
+          <span style={{ color: 'var(--text-muted)' }}>Already have an account? </span>
           <a
-            href="/signup"
+            href="/login"
             onClick={(e) => {
               e.preventDefault()
-              navigate('/signup')
+              navigate('/login')
             }}
             style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: 600 }}
           >
-            Sign up
+            Sign in
           </a>
         </div>
       </div>

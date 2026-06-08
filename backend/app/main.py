@@ -104,6 +104,37 @@ def get_admin_user(current_user: User = Depends(get_current_user)) -> User:
 
 # --- Authentication Routes ---
 
+@app.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+def signup(user_data: UserCreate, db: Session = Depends(get_db)):
+    """Register a new user (admin or standard user) in the system."""
+    # Check if username is already registered
+    existing = db.query(User).filter(User.username == user_data.username).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username already registered."
+        )
+
+    # Hash the password and create user object
+    new_user = User(
+        username=user_data.username,
+        password_hash=get_password_hash(user_data.password),
+        role=user_data.role or "user"
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    # Add audit log
+    log = Log(
+        action="USER_SIGNUP",
+        message=f"New user signed up: {new_user.username} with role: {new_user.role}"
+    )
+    db.add(log)
+    db.commit()
+
+    return new_user
+
 @app.post("/login", response_model=Token)
 def login(login_data: UserLogin, db: Session = Depends(get_db)):
     """Authenticate user credentials and return a signed JWT token."""

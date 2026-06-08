@@ -4,6 +4,7 @@ import { LayoutDashboard, Users, Terminal, LogOut } from 'lucide-react'
 
 // Pages
 import Login from './pages/Login'
+import Signup from './pages/Signup'
 import Dashboard from './pages/Dashboard'
 import Accounts from './pages/Accounts'
 import Logs from './pages/Logs'
@@ -144,6 +145,7 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
           <Route
             path="/*"
             element={
