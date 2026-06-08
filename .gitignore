@@ -1,0 +1,23 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.db
+
+# Node / React Build
+node_modules/
+dist/
+.eslintcache
+frontend/node_modules/
+frontend/dist/
+
+# Security and Credentials
+.env
+
+# Media Uploads & Logs
+backend/static/uploads/*
+!backend/static/uploads/.gitkeep
+*.log
+.DS_Store
+.vscode/

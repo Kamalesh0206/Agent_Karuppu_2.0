@@ -1,0 +1,60 @@
+validate_and_optimize_content_task:
+  description: >
+    Analyze the provided post draft.
+    Input Media: {media_path}
+    Input Caption: {caption}
+    Input Hashtags: {hashtags}
+
+    Perform the following:
+    1. Validate media extension. Image (jpg, jpeg, png) or Video (mp4, mov).
+    2. Check that caption length is within Instagram limit (max 2200 characters).
+    3. Check that hashtags are valid and under the limit (max 30).
+    4. Rewrite/optimize the caption to make it more engaging, structured with clean spacing, and add a call to action if appropriate.
+    5. Generate a collection of highly optimized, trending hashtags based on the caption and combine them with the user's hashtags, ensuring the total count is strictly under 30.
+    6. Package the results clearly.
+  expected_output: >
+    A text response containing:
+    - Validation Status (PASSED/FAILED)
+    - Media Type (IMAGE/VIDEO)
+    - Optimized Caption (inclusive of the optimized hashtags)
+    - Validation Errors (if any, like 'Caption exceeds 2200 characters')
+  agent: content_agent
+
+verify_accounts_status_task:
+  description: >
+    Review the accounts designated for publishing: {accounts_info}.
+    Filter out any accounts that are marked INACTIVE or have missing credentials.
+    Log account verification details.
+  expected_output: >
+    A list of verified accounts containing account ID, username, and decrypted access token, flagged as ready.
+  agent: admin_agent
+
+publish_content_task:
+  description: >
+    Publish the validated and optimized post to the verified accounts.
+    Optimized Content: Retrieve the optimized caption/hashtags and media type from the Content Optimization task.
+    Media Location: {media_path}
+    Target Accounts: The active accounts verified by the Admin agent.
+
+    For each target account:
+    1. Retrieve its ID, username, and encrypted token.
+    2. Invoke the InstagramPublishTool tool. The tool will handle token decryption and perform the actual Graph API call.
+    3. If the tool returns a failure, retry up to 3 times before declaring it failed.
+    4. Track the result (success, error message, post ID, account username).
+  expected_output: >
+    A structured report summarizing publishing results for each target account.
+  agent: publishing_agent
+
+monitor_and_log_task:
+  description: >
+    Collect publication reports from the Publishing task and:
+    1. Loop through all results and record a detailed log for each account in the database using the AuditLoggerTool tool.
+    2. Write a main audit log stating the publishing completion status and success rate.
+    3. Generate a clean Markdown Analytics Report containing:
+       - Total accounts targeted
+       - Total successes and failures
+       - Specific account errors
+       - Suggested improvements for the next run
+  expected_output: >
+    A final markdown execution summary containing audit records and performance analytics.
+  agent: monitoring_agent

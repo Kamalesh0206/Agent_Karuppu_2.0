@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  # 1. PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: ig_publisher_db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ig_publisher
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  # 2. Redis Task Queue Broker
+  redis:
+    image: redis:7-alpine
+    container_name: ig_publisher_redis
+    restart: always
+    ports:
+      - "6379:6379"
+
+  # 3. FastAPI Backend Server
+  backend:
+    build:
+      context: ./backend
+      dockerfile: backend.Dockerfile
+    container_name: ig_publisher_backend
+    restart: always
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./backend:/app
+      - uploads_volume:/app/static/uploads
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/ig_publisher
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET_KEY=supersecretjwtkeyfordevelopmentpurposeonlychangeinproduction
+      - ENCRYPTION_KEY=vA3Z6f_y-G1L6XQ9sH02Z_XJ0_pU48c-7Fv0v22119c=
+      - OPENAI_API_KEY=sk-placeholder-key-for-crewai-agent
+      - OPENAI_MODEL_NAME=gpt-4o-mini
+      - PUBLIC_URL_PREFIX=http://localhost:8000/static/uploads
+    depends_on:
+      - db
+      - redis
+
+  # 4. Celery Background Job Worker
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: backend.Dockerfile
+    container_name: ig_publisher_worker
+    restart: always
+    command: celery -A app.celery_app.celery_app worker --loglevel=info
+    volumes:
+      - ./backend:/app
+      - uploads_volume:/app/static/uploads
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/ig_publisher
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET_KEY=supersecretjwtkeyfordevelopmentpurposeonlychangeinproduction
+      - ENCRYPTION_KEY=vA3Z6f_y-G1L6XQ9sH02Z_XJ0_pU48c-7Fv0v22119c=
+      - OPENAI_API_KEY=sk-placeholder-key-for-crewai-agent
+      - OPENAI_MODEL_NAME=gpt-4o-mini
+      - PUBLIC_URL_PREFIX=http://localhost:8000/static/uploads
+    depends_on:
+      - db
+      - redis
+      - backend
+
+  # 5. React Frontend Dashboard
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: frontend.Dockerfile
+    container_name: ig_publisher_frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  uploads_volume:
