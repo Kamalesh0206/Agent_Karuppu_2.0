@@ -1,5 +1,6 @@
 @echo off
 title Agent Karuppu Launcher
+:: Auto-sync visual testing comment
 echo ==========================================================
 echo       Agent Karuppu Instagram Publisher Local Setup
 echo ==========================================================
