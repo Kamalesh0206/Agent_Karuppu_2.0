@@ -1,6 +1,6 @@
 import datetime
 from typing import List, Optional
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr
 
 # User Schemas
 class UserLogin(BaseModel):
@@ -9,21 +9,16 @@ class UserLogin(BaseModel):
 
 class UserCreate(BaseModel):
     full_name: str
-    email: EmailStr
-    mobile_number: str
+    email: Optional[str] = None
+    mobile_number: Optional[str] = None
     username: str
     password: str
-
-class VerifyOTPRequest(BaseModel):
-    username: str
-    email_otp: str
-    mobile_otp: str
 
 class UserResponse(BaseModel):
     id: int
     full_name: str
-    email: str
-    mobile_number: str
+    email: Optional[str] = None
+    mobile_number: Optional[str] = None
     username: str
     role: str
     status: str
@@ -38,7 +33,7 @@ class UserResponse(BaseModel):
 
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None
-    email: Optional[EmailStr] = None
+    email: Optional[str] = None
     mobile_number: Optional[str] = None
 
 class ChangePasswordRequest(BaseModel):
@@ -59,15 +54,16 @@ class TokenData(BaseModel):
 
 # Instagram Account Schemas
 class InstagramAccountCreate(BaseModel):
-    instagram_username: str
-    access_token: str
-    refresh_token: Optional[str] = None
+    instagram_username_or_email: str
+    password: str
 
 class InstagramAccountResponse(BaseModel):
     id: int
     user_id: int
-    instagram_username: str
+    instagram_username_or_email: str
     status: str
+    last_login_status: str
+    last_publish_status: str
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
@@ -77,10 +73,8 @@ class InstagramAccountResponse(BaseModel):
 # Instagram Credential Update Request Schemas
 class CredentialUpdateRequestCreate(BaseModel):
     instagram_account_id: Optional[int] = None
-    requested_username: str
+    requested_username_or_email: str
     requested_password: Optional[str] = None
-    requested_access_token: str
-    requested_refresh_token: Optional[str] = None
     reason: str
 
 class CredentialUpdateRequestProcess(BaseModel):
@@ -91,7 +85,8 @@ class CredentialUpdateRequestResponse(BaseModel):
     id: int
     user_id: int
     instagram_account_id: Optional[int] = None
-    requested_username: str
+    requested_username_or_email: str
+    requested_password: Optional[str] = None
     status: str
     reason: str
     admin_comments: Optional[str] = None
@@ -112,12 +107,16 @@ class PostResponse(BaseModel):
     id: int
     user_id: int
     instagram_account_id: int
-    instagram_username: Optional[str] = None
+    instagram_username: Optional[str] = None  # Will display username/email on dashboard history
     media_path: str
     caption: Optional[str] = None
     hashtags: Optional[str] = None
     publish_status: str
+    failure_reason: Optional[str] = None
+    job_id: Optional[str] = None
+    progress_percent: int = 0
     created_at: datetime.datetime
+    updated_at: Optional[datetime.datetime] = None
 
     class Config:
         from_attributes = True

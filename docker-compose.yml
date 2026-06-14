@@ -4,12 +4,12 @@ services:
   # 1. PostgreSQL Database
   db:
     image: postgres:15-alpine
-    container_name: ig_publisher_db
+    container_name: agent_karuppu_db
     restart: always
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: ig_publisher
+      POSTGRES_DB: agent_karuppu
     ports:
       - "5432:5432"
     volumes:
@@ -18,7 +18,7 @@ services:
   # 2. Redis Task Queue Broker
   redis:
     image: redis:7-alpine
-    container_name: ig_publisher_redis
+    container_name: agent_karuppu_redis
     restart: always
     ports:
       - "6379:6379"
@@ -28,7 +28,7 @@ services:
     build:
       context: ./backend
       dockerfile: backend.Dockerfile
-    container_name: ig_publisher_backend
+    container_name: agent_karuppu_backend
     restart: always
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     volumes:
@@ -37,7 +37,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/ig_publisher
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/agent_karuppu
       - REDIS_URL=redis://redis:6379/0
       - JWT_SECRET_KEY=supersecretjwtkeyfordevelopmentpurposeonlychangeinproduction
       - ENCRYPTION_KEY=vA3Z6f_y-G1L6XQ9sH02Z_XJ0_pU48c-7Fv0v22119c=
@@ -53,14 +53,14 @@ services:
     build:
       context: ./backend
       dockerfile: backend.Dockerfile
-    container_name: ig_publisher_worker
+    container_name: agent_karuppu_worker
     restart: always
     command: celery -A app.celery_app.celery_app worker --loglevel=info
     volumes:
       - ./backend:/app
       - uploads_volume:/app/static/uploads
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/ig_publisher
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/agent_karuppu
       - REDIS_URL=redis://redis:6379/0
       - JWT_SECRET_KEY=supersecretjwtkeyfordevelopmentpurposeonlychangeinproduction
       - ENCRYPTION_KEY=vA3Z6f_y-G1L6XQ9sH02Z_XJ0_pU48c-7Fv0v22119c=
@@ -77,10 +77,10 @@ services:
     build:
       context: ./frontend
       dockerfile: frontend.Dockerfile
-    container_name: ig_publisher_frontend
+    container_name: agent_karuppu_frontend
     restart: always
     ports:
-      - "3000:3000"
+      - "3000:80"
     depends_on:
       - backend
 

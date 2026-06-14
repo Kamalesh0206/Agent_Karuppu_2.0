@@ -13,7 +13,7 @@ from .config import settings
 from .database import engine, Base, SessionLocal, get_db
 from .models import User, InstagramAccount, CredentialUpdateRequest, Post, Log
 from .schemas import (
-    UserLogin, UserCreate, VerifyOTPRequest, UserResponse, UserUpdate, ChangePasswordRequest,
+    UserLogin, UserCreate, UserResponse, UserUpdate, ChangePasswordRequest,
     Token, TokenData,
     InstagramAccountCreate, InstagramAccountResponse,
     CredentialUpdateRequestCreate, CredentialUpdateRequestResponse, CredentialUpdateRequestProcess,
@@ -26,14 +26,19 @@ from .tasks import publish_post_task
 # Initialize FastAPI App
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    description="Backend server for Instagram Publishing Management Platform with RBAC, OTP, and Credential Requests.",
-    version="2.0.0"
+    description="Backend server for Instagram Publishing Management Platform with RBAC and Credential-Based Accounts.",
+    version="3.0.0"
 )
 
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost",
+        "http://127.0.0.1"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -50,9 +55,83 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 # Startup database initialization & seeding
 @app.on_event("startup")
 def startup_db_setup():
-    # Drop and recreate all tables to ensure the database schema matches our SQLAlchemy models exactly
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
+    # Commented out drop_all to preserve existing user and admin access
+    # Base.metadata.drop_all(bind=engine)
+    
+    # Check if we need to migrate users table columns (email and mobile_number) to nullable in SQLite
+    from sqlalchemy import inspect, text
+    inspector = inspect(engine)
+    if "users" in inspector.get_table_names():
+        columns = {col["name"]: col for col in inspector.get_columns("users")}
+        email_nullable = columns.get("email", {}).get("nullable", True)
+        mobile_nullable = columns.get("mobile_number", {}).get("nullable", True)
+        
+        if not email_nullable or not mobile_nullable:
+            # Only migrate if database is SQLite (standard local setup)
+            if settings.DATABASE_URL.startswith("sqlite"):
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(text("PRAGMA foreign_keys = OFF;"))
+                        conn.execute(text("ALTER TABLE users RENAME TO users_old;"))
+                    
+                    # Recreate all tables (this creates 'users' with new nullable schema)
+                    Base.metadata.create_all(bind=engine)
+                    
+                    with engine.begin() as conn:
+                        conn.execute(text("""
+                            INSERT INTO users (
+                                id, full_name, email, mobile_number, username, password_hash, 
+                                role, status, email_verified, mobile_verified, publishing_permission, 
+                                created_at, updated_at
+                            ) 
+                            SELECT 
+                                id, full_name, email, mobile_number, username, password_hash, 
+                                role, status, email_verified, mobile_verified, publishing_permission, 
+                                created_at, updated_at 
+                            FROM users_old;
+                        """))
+                        conn.execute(text("DROP TABLE users_old;"))
+                        conn.execute(text("PRAGMA foreign_keys = ON;"))
+                except Exception as e:
+                    print(f"[Migration Warning] SQLite users table migration failed: {e}")
+                    Base.metadata.create_all(bind=engine)
+            else:
+                Base.metadata.create_all(bind=engine)
+        else:
+            Base.metadata.create_all(bind=engine)
+    else:
+        Base.metadata.create_all(bind=engine)
+    
+    # Check if we need to migrate posts table to add failure_reason column
+    if "posts" in inspector.get_table_names():
+        posts_cols = {col["name"]: col for col in inspector.get_columns("posts")}
+        if "failure_reason" not in posts_cols:
+            if settings.DATABASE_URL.startswith("sqlite"):
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(text("ALTER TABLE posts ADD COLUMN failure_reason TEXT;"))
+                except Exception as e:
+                    print(f"[Migration Warning] SQLite posts table migration failed: {e}")
+
+        # Check if we need to migrate posts table to add job_id, progress_percent, and updated_at columns
+        if "job_id" not in posts_cols:
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE posts ADD COLUMN job_id VARCHAR;"))
+            except Exception as e:
+                print(f"[Migration Warning] SQLite posts table job_id migration failed: {e}")
+        if "progress_percent" not in posts_cols:
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE posts ADD COLUMN progress_percent INTEGER DEFAULT 0 NOT NULL;"))
+            except Exception as e:
+                print(f"[Migration Warning] SQLite posts table progress_percent migration failed: {e}")
+        if "updated_at" not in posts_cols:
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE posts ADD COLUMN updated_at DATETIME;"))
+            except Exception as e:
+                print(f"[Migration Warning] SQLite posts table updated_at migration failed: {e}")
     
     db = SessionLocal()
     try:
@@ -85,6 +164,15 @@ def startup_db_setup():
             db.commit()
     finally:
         db.close()
+
+    # Initialize Git Sync Manager
+    try:
+        from .git_sync import GitSyncManager
+        repo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        GitSyncManager().init(repo_path)
+        print(f"[Git Sync] Initialized on repository path: {repo_path}")
+    except Exception as e:
+        print(f"[Git Sync Warning] Failed to initialize: {e}")
 
 # Helper for Audit Logging
 def create_audit_log(db: Session, action: str, description: str, user_id: Optional[int] = None, ip_address: Optional[str] = None):
@@ -131,56 +219,83 @@ def get_super_admin(current_user: User = Depends(get_current_user)) -> User:
         )
     return current_user
 
+# --- Git Synchronization Routes ---
+
+@app.get("/git/status")
+def get_git_status(current_user: User = Depends(get_current_user)):
+    from .git_sync import GitSyncManager
+    mgr = GitSyncManager()
+    if not mgr.last_commit:
+        commit_info, _ = mgr._run_cmd(["git", "log", "-n", "1", "--format=%s (%h)"])
+        mgr.last_commit = commit_info
+    
+    return {
+        "status": mgr.status,
+        "last_sync": mgr.last_sync_time.isoformat() if mgr.last_sync_time else None,
+        "last_commit": mgr.last_commit,
+        "error": mgr.error_message,
+        "uncommitted_changes": mgr.uncommitted_changes,
+        "need_push": mgr.need_push
+    }
+
+@app.post("/git/sync")
+def trigger_git_sync(current_user: User = Depends(get_current_user)):
+    import threading
+    from .git_sync import GitSyncManager
+    mgr = GitSyncManager()
+    if mgr.status == "SYNCING":
+        raise HTTPException(status_code=400, detail="Sync already in progress")
+    
+    threading.Thread(target=mgr.perform_sync, daemon=True).start()
+    return {"message": "Synchronization initiated"}
+
 # --- Authentication & Registration Routes ---
 
 @app.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def signup(user_data: UserCreate, request: Request, db: Session = Depends(get_db)):
-    """Register a new standard user account. Super Admin creation is blocked."""
-    # Prevent duplicate username, email, mobile_number
-    if user_data.email.lower() == "agentkaruppuadmin@gmail.com":
+    """Register a new user account. OTP verification is skipped (handled directly via status pending)."""
+    
+    # Strip and nullify empty string inputs
+    email_val = user_data.email.strip() if user_data.email and user_data.email.strip() else None
+    mobile_val = user_data.mobile_number.strip() if user_data.mobile_number and user_data.mobile_number.strip() else None
+
+    # Validate that at least one of email or mobile number is provided
+    if not email_val and not mobile_val:
+        raise HTTPException(status_code=400, detail="Either email or mobile number must be provided.")
+
+    if email_val and email_val.lower() == "agentkaruppuadmin@gmail.com":
         raise HTTPException(status_code=400, detail="Cannot register Super Admin email.")
         
     existing_username = db.query(User).filter(User.username == user_data.username).first()
     if existing_username:
         raise HTTPException(status_code=400, detail="Username already registered.")
         
-    existing_email = db.query(User).filter(User.email == user_data.email).first()
-    if existing_email:
-        raise HTTPException(status_code=400, detail="Email address already registered.")
+    if email_val:
+        existing_email = db.query(User).filter(User.email == email_val).first()
+        if existing_email:
+            raise HTTPException(status_code=400, detail="Email address already registered.")
         
-    existing_mobile = db.query(User).filter(User.mobile_number == user_data.mobile_number).first()
-    if existing_mobile:
-        raise HTTPException(status_code=400, detail="Mobile number already registered.")
+    if mobile_val:
+        existing_mobile = db.query(User).filter(User.mobile_number == mobile_val).first()
+        if existing_mobile:
+            raise HTTPException(status_code=400, detail="Mobile number already registered.")
 
-    # Generate random 6-digit verification codes
-    email_otp = f"{random.randint(100000, 999999)}"
-    mobile_otp = f"{random.randint(100000, 999999)}"
-
-    # Create new User
+    # Create new User (email and mobile are auto-verified as OTP is removed)
     new_user = User(
         full_name=user_data.full_name,
-        email=user_data.email,
-        mobile_number=user_data.mobile_number,
+        email=email_val,
+        mobile_number=mobile_val,
         username=user_data.username,
         password_hash=get_password_hash(user_data.password),
         role="User",
         status="Pending Approval",
-        email_verified=False,
-        mobile_verified=False,
-        publishing_permission=True,
-        email_otp=email_otp,
-        mobile_otp=mobile_otp
+        email_verified=True,
+        mobile_verified=True,
+        publishing_permission=True
     )
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-
-    # Print OTPs to console log for development testing convenience
-    print("\n" + "="*50)
-    print(f"VERIFICATION CODES GENERATED FOR: {new_user.username}")
-    print(f"Email OTP:  {email_otp}")
-    print(f"Mobile OTP: {mobile_otp}")
-    print("="*50 + "\n")
 
     client_ip = request.client.host if request.client else "127.0.0.1"
 
@@ -188,51 +303,20 @@ def signup(user_data: UserCreate, request: Request, db: Session = Depends(get_db
     create_audit_log(
         db=db,
         action="USER_SIGNUP",
-        description=f"User registered: {new_user.username}. OTP codes generated. Email OTP: {email_otp}, Mobile OTP: {mobile_otp}",
+        description=f"User registered: {new_user.username}. Account pending Super Admin approval.",
         user_id=new_user.id,
         ip_address=client_ip
     )
 
     return new_user
 
-@app.post("/verify-otp")
-def verify_otp(verify_data: VerifyOTPRequest, request: Request, db: Session = Depends(get_db)):
-    """Verify standard user's email and mobile OTP codes."""
-    user = db.query(User).filter(User.username == verify_data.username).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found.")
-
-    if user.email_verified and user.mobile_verified:
-        return {"message": "Account is already verified."}
-
-    # Verify codes
-    if user.email_otp != verify_data.email_otp or user.mobile_otp != verify_data.mobile_otp:
-        raise HTTPException(status_code=400, detail="Invalid verification code(s).")
-
-    # Mark verified
-    user.email_verified = True
-    user.mobile_verified = True
-    user.email_otp = None
-    user.mobile_otp = None
-    db.commit()
-
-    client_ip = request.client.host if request.client else "127.0.0.1"
-
-    create_audit_log(
-        db=db,
-        action="USER_VERIFICATION",
-        description=f"User {user.username} verified email and mobile OTPs successfully.",
-        user_id=user.id,
-        ip_address=client_ip
-    )
-
-    return {"message": "Verification successful. Your account is now pending approval by the Super Admin."}
-
 @app.post("/login", response_model=Token)
 def login(login_data: UserLogin, request: Request, db: Session = Depends(get_db)):
-    """Authenticate credentials. Restricts unverified or unapproved users from logging in."""
+    """Authenticate credentials. OTP check is bypassed, but approval status is strictly verified."""
     user = db.query(User).filter(
-        (User.username == login_data.username) | (User.email == login_data.username)
+        (User.username == login_data.username) | 
+        (User.email == login_data.username) | 
+        (User.mobile_number == login_data.username)
     ).first()
 
     client_ip = request.client.host if request.client else "127.0.0.1"
@@ -247,13 +331,6 @@ def login(login_data: UserLogin, request: Request, db: Session = Depends(get_db)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username/email or password"
-        )
-
-    # Check verification
-    if not user.email_verified or not user.mobile_verified:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account unverified. Please complete email and mobile verification."
         )
 
     # Check approval status
@@ -303,19 +380,34 @@ def update_profile(profile_data: UserUpdate, request: Request, db: Session = Dep
     """Update profile fields (Full Name, Email, Mobile). Validates duplicates."""
     client_ip = request.client.host if request.client else "127.0.0.1"
     
-    if profile_data.email:
-        # Check duplicate email
-        existing = db.query(User).filter(User.email == profile_data.email, User.id != current_user.id).first()
-        if existing:
-            raise HTTPException(status_code=400, detail="Email address already in use.")
-        current_user.email = profile_data.email
+    # Strip and nullify empty string inputs
+    email_val = profile_data.email.strip() if profile_data.email and profile_data.email.strip() else None
+    mobile_val = profile_data.mobile_number.strip() if profile_data.mobile_number and profile_data.mobile_number.strip() else None
 
-    if profile_data.mobile_number:
-        # Check duplicate mobile number
-        existing = db.query(User).filter(User.mobile_number == profile_data.mobile_number, User.id != current_user.id).first()
-        if existing:
-            raise HTTPException(status_code=400, detail="Mobile number already in use.")
-        current_user.mobile_number = profile_data.mobile_number
+    # Check that at least one remains populated
+    final_email = email_val if profile_data.email is not None else current_user.email
+    final_mobile = mobile_val if profile_data.mobile_number is not None else current_user.mobile_number
+
+    if not final_email and not final_mobile:
+        raise HTTPException(status_code=400, detail="Either email or mobile number must be provided.")
+
+    if profile_data.email is not None:
+        if email_val:
+            existing = db.query(User).filter(User.email == email_val, User.id != current_user.id).first()
+            if existing:
+                raise HTTPException(status_code=400, detail="Email address already in use.")
+            current_user.email = email_val
+        else:
+            current_user.email = None
+
+    if profile_data.mobile_number is not None:
+        if mobile_val:
+            existing = db.query(User).filter(User.mobile_number == mobile_val, User.id != current_user.id).first()
+            if existing:
+                raise HTTPException(status_code=400, detail="Mobile number already in use.")
+            current_user.mobile_number = mobile_val
+        else:
+            current_user.mobile_number = None
 
     if profile_data.full_name:
         current_user.full_name = profile_data.full_name
@@ -354,7 +446,7 @@ def change_password(pass_data: ChangePasswordRequest, request: Request, db: Sess
 
     return {"message": "Password updated successfully."}
 
-# --- Instagram Account Routes ---
+# --- Instagram Account Routes (Credential-Based) ---
 
 @app.get("/accounts", response_model=List[InstagramAccountResponse])
 def get_accounts(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -365,23 +457,23 @@ def get_accounts(db: Session = Depends(get_db), current_user: User = Depends(get
 
 @app.post("/accounts", response_model=InstagramAccountResponse)
 def create_account(account_data: InstagramAccountCreate, request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Add a new Instagram account. Tokens are encrypted prior to storage."""
+    """Add a new Instagram credential. The password is encrypted before saving."""
     client_ip = request.client.host if request.client else "127.0.0.1"
 
-    # Duplication check
     existing = db.query(InstagramAccount).filter(
-        InstagramAccount.instagram_username == account_data.instagram_username,
+        InstagramAccount.instagram_username_or_email == account_data.instagram_username_or_email,
         InstagramAccount.user_id == current_user.id
     ).first()
     if existing:
-        raise HTTPException(status_code=400, detail=f"Account @{account_data.instagram_username} already connected.")
+        raise HTTPException(status_code=400, detail=f"Account '{account_data.instagram_username_or_email}' already connected.")
 
     new_account = InstagramAccount(
         user_id=current_user.id,
-        instagram_username=account_data.instagram_username,
-        access_token=encrypt_token(account_data.access_token),
-        refresh_token=encrypt_token(account_data.refresh_token) if account_data.refresh_token else None,
-        status="ACTIVE"
+        instagram_username_or_email=account_data.instagram_username_or_email,
+        encrypted_password=encrypt_token(account_data.password),
+        status="ACTIVE",
+        last_login_status="NEVER_LOGGED",
+        last_publish_status="NEVER_PUBLISHED"
     )
     db.add(new_account)
     db.commit()
@@ -390,7 +482,7 @@ def create_account(account_data: InstagramAccountCreate, request: Request, db: S
     create_audit_log(
         db=db,
         action="IG_ACCOUNT_ADD",
-        description=f"User {current_user.username} connected Instagram account: @{new_account.instagram_username}",
+        description=f"User {current_user.username} connected Instagram credentials for: {new_account.instagram_username_or_email}",
         user_id=current_user.id,
         ip_address=client_ip
     )
@@ -399,17 +491,18 @@ def create_account(account_data: InstagramAccountCreate, request: Request, db: S
 
 @app.put("/accounts/{account_id}", response_model=InstagramAccountResponse)
 def admin_update_account(account_id: int, account_data: InstagramAccountCreate, request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_super_admin)):
-    """Allow Super Admin to update Instagram account details directly."""
+    """Allow Super Admin to update Instagram username/email and passwords directly."""
     client_ip = request.client.host if request.client else "127.0.0.1"
 
     account = db.query(InstagramAccount).filter(InstagramAccount.id == account_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="Instagram account not found.")
 
-    account.instagram_username = account_data.instagram_username
-    account.access_token = encrypt_token(account_data.access_token)
-    if account_data.refresh_token:
-        account.refresh_token = encrypt_token(account_data.refresh_token)
+    account.instagram_username_or_email = account_data.instagram_username_or_email
+    account.encrypted_password = encrypt_token(account_data.password)
+    account.status = "ACTIVE"  # Reset
+    account.last_login_status = "NEVER_LOGGED"
+    account.last_publish_status = "NEVER_PUBLISHED"
     
     db.commit()
     db.refresh(account)
@@ -417,7 +510,7 @@ def admin_update_account(account_id: int, account_data: InstagramAccountCreate, 
     create_audit_log(
         db=db,
         action="IG_ACCOUNT_UPDATE",
-        description=f"Super Admin updated Instagram account ID {account.id} (@{account.instagram_username}) directly.",
+        description=f"Super Admin updated Instagram credentials directly for account ID {account.id} ({account.instagram_username_or_email}).",
         user_id=current_user.id,
         ip_address=client_ip
     )
@@ -433,43 +526,40 @@ def admin_delete_account(account_id: int, request: Request, db: Session = Depend
     if not account:
         raise HTTPException(status_code=404, detail="Instagram account not found.")
 
-    username = account.instagram_username
+    username_email = account.instagram_username_or_email
     db.delete(account)
     db.commit()
 
     create_audit_log(
         db=db,
         action="IG_ACCOUNT_DELETE",
-        description=f"Super Admin deleted Instagram account: @{username} (ID: {account_id}).",
+        description=f"Super Admin deleted Instagram credentials for: {username_email} (ID: {account_id}).",
         user_id=current_user.id,
         ip_address=client_ip
     )
 
-    return {"message": f"Instagram account @{username} credentials removed successfully."}
+    return {"message": f"Instagram credentials for {username_email} removed successfully."}
 
 # --- Credential Update Request Routes ---
 
 @app.post("/credential-requests", response_model=CredentialUpdateRequestResponse)
 def create_credential_request(req_data: CredentialUpdateRequestCreate, request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Submit a request to update Instagram credentials. Direct edits are blocked for standard users."""
+    """Submit a request to update Instagram credentials. Bypasses direct updates for users."""
     client_ip = request.client.host if request.client else "127.0.0.1"
 
-    # If updating an existing account, check if it exists and belongs to the user
     if req_data.instagram_account_id:
         acc = db.query(InstagramAccount).filter(
             InstagramAccount.id == req_data.instagram_account_id,
             InstagramAccount.user_id == current_user.id
         ).first()
         if not acc:
-            raise HTTPException(status_code=404, detail="Selected Instagram account not found.")
+            raise HTTPException(status_code=404, detail="Instagram account not found.")
 
     new_request = CredentialUpdateRequest(
         user_id=current_user.id,
         instagram_account_id=req_data.instagram_account_id,
-        requested_username=req_data.requested_username,
-        requested_password=req_data.requested_password,
-        requested_access_token=req_data.requested_access_token,
-        requested_refresh_token=req_data.requested_refresh_token,
+        requested_username_or_email=req_data.requested_username_or_email,
+        requested_password=req_data.requested_password, # Plain text stored here for admin inspection
         reason=req_data.reason,
         status="Pending"
     )
@@ -480,7 +570,7 @@ def create_credential_request(req_data: CredentialUpdateRequestCreate, request: 
     create_audit_log(
         db=db,
         action="CREDENTIAL_REQUEST_SUBMIT",
-        description=f"User {current_user.username} submitted credential update request for @{new_request.requested_username}",
+        description=f"User {current_user.username} submitted credential update request for: {new_request.requested_username_or_email}",
         user_id=current_user.id,
         ip_address=client_ip
     )
@@ -510,11 +600,12 @@ def process_credential_request(req_id: int, process_data: CredentialUpdateReques
     if process_data.status == "Approved" and req.instagram_account_id:
         acc = db.query(InstagramAccount).filter(InstagramAccount.id == req.instagram_account_id).first()
         if acc:
-            acc.instagram_username = req.requested_username
-            acc.access_token = encrypt_token(req.requested_access_token)
-            if req.requested_refresh_token:
-                acc.refresh_token = encrypt_token(req.requested_refresh_token)
-            acc.status = "ACTIVE"  # Re-enable
+            acc.instagram_username_or_email = req.requested_username_or_email
+            if req.requested_password:
+                acc.encrypted_password = encrypt_token(req.requested_password)
+            acc.status = "ACTIVE"  # Reset
+            acc.last_login_status = "NEVER_LOGGED"
+            acc.last_publish_status = "NEVER_PUBLISHED"
             db.commit()
 
     db.commit()
@@ -523,7 +614,7 @@ def process_credential_request(req_id: int, process_data: CredentialUpdateReques
     create_audit_log(
         db=db,
         action=f"CREDENTIAL_REQUEST_{process_data.status.upper()}",
-        description=f"Super Admin processed credential request ID {req_id} for @{req.requested_username} -> {process_data.status}.",
+        description=f"Super Admin processed credential request ID {req_id} for {req.requested_username_or_email} -> {process_data.status}.",
         user_id=current_user.id,
         ip_address=client_ip
     )
@@ -579,8 +670,11 @@ def publish_post(pub_request: PublishRequest, request: Request, db: Session = De
             raise HTTPException(status_code=400, detail="Media file not found on server.")
 
     created_post_ids = []
+    job_id = str(uuid.uuid4())
     
-    # Iterate and create a Post database row for each targeted account
+    import redis
+    import json
+    
     for acc_id in pub_request.account_ids:
         acc = db.query(InstagramAccount).filter(InstagramAccount.id == acc_id).first()
         if not acc:
@@ -592,12 +686,31 @@ def publish_post(pub_request: PublishRequest, request: Request, db: Session = De
             media_path=pub_request.media_path,
             caption=pub_request.caption,
             hashtags=pub_request.hashtags,
-            publish_status="Pending"
+            publish_status="Queued",
+            progress_percent=10,
+            job_id=job_id
         )
         db.add(new_post)
         db.commit()
         db.refresh(new_post)
         created_post_ids.append(new_post.id)
+
+        # Broadcast initial progress to Redis
+        try:
+            r = redis.Redis.from_url(settings.REDIS_URL)
+            payload = {
+                "post_id": new_post.id,
+                "job_id": new_post.job_id,
+                "instagram_account_id": new_post.instagram_account_id,
+                "status": "Queued",
+                "progress_percent": 10,
+                "failure_reason": None,
+                "updated_at": new_post.created_at.isoformat()
+            }
+            r.publish("instagram_publish_progress", json.dumps(payload))
+            r.close()
+        except Exception as e:
+            print(f"[Redis Warning] Failed to publish initial progress: {e}")
 
         # Trigger background execution for this specific post
         publish_post_task.delay(new_post.id)
@@ -605,14 +718,15 @@ def publish_post(pub_request: PublishRequest, request: Request, db: Session = De
     create_audit_log(
         db=db,
         action="PUBLISH_QUEUE",
-        description=f"User {current_user.username} queued publication for post IDs: {created_post_ids}",
+        description=f"User {current_user.username} queued publication for post IDs: {created_post_ids} in job {job_id}",
         user_id=current_user.id,
         ip_address=client_ip
     )
 
     return {
-        "message": "Publishing job(s) successfully queued.",
-        "post_ids": created_post_ids
+        "message": "Publishing started successfully. You can monitor real-time progress in the Publishing Progress panel.",
+        "post_ids": created_post_ids,
+        "job_id": job_id
     }
 
 @app.get("/publish-history", response_model=List[PostResponse])
@@ -623,13 +737,12 @@ def get_publish_history(db: Session = Depends(get_db), current_user: User = Depe
     else:
         posts = db.query(Post).filter(Post.user_id == current_user.id).order_by(Post.created_at.desc()).all()
 
-    # Append instagram username to responses dynamically for the frontend
+    # Append instagram username/email dynamically
     res = []
     for p in posts:
         acc = db.query(InstagramAccount).filter(InstagramAccount.id == p.instagram_account_id).first()
-        username = acc.instagram_username if acc else f"Unknown Account ({p.instagram_account_id})"
+        username = acc.instagram_username_or_email if acc else f"Unknown Account ({p.instagram_account_id})"
         
-        # Build schema response dict
         res.append({
             "id": p.id,
             "user_id": p.user_id,
@@ -639,9 +752,114 @@ def get_publish_history(db: Session = Depends(get_db), current_user: User = Depe
             "caption": p.caption,
             "hashtags": p.hashtags,
             "publish_status": p.publish_status,
-            "created_at": p.created_at
+            "failure_reason": p.failure_reason,
+            "job_id": p.job_id,
+            "progress_percent": p.progress_percent,
+            "created_at": p.created_at,
+            "updated_at": p.updated_at
         })
     return res
+
+
+@app.get("/publish-progress/stream")
+async def publish_progress_stream(request: Request):
+    """
+    Server-Sent Events (SSE) streaming endpoint that broadcasts real-time 
+    publishing progress events using Redis Pub/Sub.
+    """
+    import redis.asyncio as aioredis
+    import json
+    import asyncio
+    from fastapi.responses import StreamingResponse
+
+    async def event_generator():
+        r = await aioredis.from_url(settings.REDIS_URL)
+        pubsub = r.pubsub()
+        await pubsub.subscribe("instagram_publish_progress")
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if message is not None:
+                    data = message["data"]
+                    if isinstance(data, bytes):
+                        data = data.decode("utf-8")
+                    yield f"data: {data}\n\n"
+                await asyncio.sleep(0.1)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await pubsub.unsubscribe("instagram_publish_progress")
+            await pubsub.close()
+            await r.close()
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.post("/publish/{post_id}/retry", status_code=status.HTTP_202_ACCEPTED)
+def retry_post(post_id: int, request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """
+    Resets the status of a failed post to 'Queued' (10% progress),
+    clears failure_reason, broadcasts the event to Redis, and re-queues Celery task.
+    """
+    import datetime
+    import redis
+    import json
+    
+    client_ip = request.client.host if request.client else "127.0.0.1"
+
+    if not current_user.publishing_permission:
+        raise HTTPException(status_code=403, detail="Your publishing permissions have been revoked by the Super Admin.")
+
+    post = db.query(Post).filter(Post.id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found.")
+
+    if current_user.role != "Super Admin" and post.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to retry this post.")
+
+    # Reset post status and progress
+    post.publish_status = "Queued"
+    post.progress_percent = 10
+    post.failure_reason = None
+    post.updated_at = datetime.datetime.utcnow()
+    db.commit()
+    db.refresh(post)
+
+    # Broadcast initial progress to Redis
+    try:
+        r = redis.Redis.from_url(settings.REDIS_URL)
+        payload = {
+            "post_id": post.id,
+            "job_id": post.job_id,
+            "instagram_account_id": post.instagram_account_id,
+            "status": "Queued",
+            "progress_percent": 10,
+            "failure_reason": None,
+            "updated_at": post.updated_at.isoformat()
+        }
+        r.publish("instagram_publish_progress", json.dumps(payload))
+        r.close()
+    except Exception as e:
+        print(f"[Redis Warning] Failed to publish retry progress: {e}")
+
+    # Re-trigger background execution for this post
+    publish_post_task.delay(post.id)
+
+    create_audit_log(
+        db=db,
+        action="PUBLISH_RETRY",
+        description=f"User {current_user.username} retried publication for post ID: {post.id} (Job ID: {post.job_id})",
+        user_id=current_user.id,
+        ip_address=client_ip
+    )
+
+    return {
+        "message": "Publishing retried successfully. You can monitor progress in the panel.",
+        "post_id": post.id,
+        "job_id": post.job_id
+    }
 
 # --- Super Admin Management Routes ---
 
@@ -752,13 +970,46 @@ def get_logs(db: Session = Depends(get_db), current_user: User = Depends(get_cur
     else:
         logs = db.query(Log).filter(Log.user_id == current_user.id).order_by(Log.created_at.desc()).limit(100).all()
 
-    # Hydrate usernames dynamically for the dashboard
+    # Hydrate usernames
     res = []
     for l in logs:
         username = None
         if l.user_id:
             usr = db.query(User).filter(User.id == l.user_id).first()
             username = usr.username if usr else f"Deleted User (ID: {l.user_id})"
+        res.append({
+            "id": l.id,
+            "user_id": l.user_id,
+            "username": username,
+            "action": l.action,
+            "description": l.description,
+            "ip_address": l.ip_address,
+            "created_at": l.created_at
+        })
+    return res
+
+@app.get("/publish-history/{post_id}/logs", response_model=List[LogResponse])
+def get_post_logs(post_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Retrieve audit logs for a specific post. Standard users see their own; Super Admin views all."""
+    post = db.query(Post).filter(Post.id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found.")
+    
+    if current_user.role != "Super Admin" and post.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to view these logs.")
+        
+    logs = db.query(Log).filter(
+        (Log.description.like(f"%post {post_id}%")) | 
+        (Log.description.like(f"%post ID: {post_id}%")) | 
+        (Log.description.like(f"%post ID {post_id}%"))
+    ).order_by(Log.created_at.asc()).all()
+
+    res = []
+    for l in logs:
+        username = None
+        if l.user_id:
+            usr = db.query(User).filter(User.id == l.user_id).first()
+            username = usr.username if usr else f"User ID: {l.user_id}"
         res.append({
             "id": l.id,
             "user_id": l.user_id,

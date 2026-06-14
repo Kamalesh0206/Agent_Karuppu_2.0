@@ -1,7 +1,7 @@
 @echo off
-title Instagram Multi-Publisher Launcher
+title Agent Karuppu Launcher
 echo ==========================================================
-echo       Instagram Multi-Account Publisher Local Setup
+echo       Agent Karuppu Instagram Publisher Local Setup
 echo ==========================================================
 echo.
 
@@ -34,7 +34,7 @@ if errorlevel 1 (
 
 :: 4. Start Backend Server in a new window
 echo [System] Starting FastAPI Backend on port 8000...
-start cmd /k "title IG Publisher - Backend && call venv\Scripts\activate && cd backend && uvicorn app.main:app --host 127.0.0.1 --port 8000"
+start cmd /k "title Agent Karuppu - Backend && call venv\Scripts\activate && cd backend && uvicorn app.main:app --host 127.0.0.1 --port 8000"
 
 :: 5. Install Frontend dependencies
 echo [System] Installing frontend node packages (this may take a minute)...
@@ -48,18 +48,18 @@ if errorlevel 1 (
 
 :: 6. Start Frontend Server in a new window
 echo [System] Starting React Dashboard on port 3000...
-start cmd /k "title IG Publisher - Frontend && npm.cmd run dev"
+start cmd /k "title Agent Karuppu - Frontend && npm.cmd run dev"
 
 echo.
 echo ==========================================================
 echo              LAUNCH COMPLETED SUCCESSFULLY!
 echo ==========================================================
 echo.
-echo  - React Dashboard Link:  http://localhost:3000
-echo  - FastAPI Swagger Docs:  http://localhost:8000/docs
+echo  - React Dashboard Link:  http://127.0.0.1:3000
+echo  - FastAPI Swagger Docs:  http://127.0.0.1:8000/docs
 echo.
 echo Launching your browser now...
 timeout /t 3 > nul
-start http://localhost:3000
+start http://127.0.0.1:3000
 
 exit /b 0

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { useAuth } from '../App'
-import { Plus, Edit2, Trash2, ShieldAlert, Check, X, ToggleLeft, ToggleRight, FileInput, ClipboardCheck } from 'lucide-react'
+import { Plus, Edit2, Trash2, ShieldAlert, Check, X, Key, Lock, ClipboardCheck, AlertTriangle } from 'lucide-react'
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from '../config'
 
 export default function Accounts() {
   const { user } = useAuth()
@@ -18,16 +18,13 @@ export default function Accounts() {
   const [isRequestFormOpen, setIsRequestFormOpen] = useState(false)
   
   // Add Account form states
-  const [username, setUsername] = useState('')
-  const [accessToken, setAccessToken] = useState('')
-  const [refreshToken, setRefreshToken] = useState('')
+  const [usernameOrEmail, setUsernameOrEmail] = useState('')
+  const [password, setPassword] = useState('')
 
   // Credential Update Request form states
   const [selectedAccountId, setSelectedAccountId] = useState(null)
-  const [reqUsername, setReqUsername] = useState('')
+  const [reqUsernameOrEmail, setReqUsernameOrEmail] = useState('')
   const [reqPassword, setReqPassword] = useState('')
-  const [reqAccessToken, setReqAccessToken] = useState('')
-  const [reqRefreshToken, setReqRefreshToken] = useState('')
   const [reqReason, setReqReason] = useState('')
 
   // Edit Account state (Super Admin only)
@@ -63,8 +60,8 @@ export default function Accounts() {
     setError('')
     setSuccess('')
 
-    if (!username.trim() || !accessToken.trim()) {
-      setError('Username and Page Access Token are required.')
+    if (!usernameOrEmail.trim() || !password.trim()) {
+      setError('Username/Email and Password are required.')
       return
     }
 
@@ -76,9 +73,8 @@ export default function Accounts() {
           'Authorization': `Bearer ${user.token}`
         },
         body: JSON.stringify({
-          instagram_username: username.trim(),
-          access_token: accessToken.trim(),
-          refresh_token: refreshToken.trim() || null
+          instagram_username_or_email: usernameOrEmail.trim(),
+          password: password.trim()
         })
       })
 
@@ -87,11 +83,10 @@ export default function Accounts() {
         throw new Error(data.detail || 'Failed to connect account.')
       }
 
-      setSuccess(`Account @${data.instagram_username} connected successfully!`)
+      setSuccess(`Account ${data.instagram_username_or_email} connected successfully!`)
       setIsAddFormOpen(false)
-      setUsername('')
-      setAccessToken('')
-      setRefreshToken('')
+      setUsernameOrEmail('')
+      setPassword('')
       fetchAccounts()
     } catch (err) {
       setError(err.message)
@@ -104,6 +99,11 @@ export default function Accounts() {
     setError('')
     setSuccess('')
 
+    if (!usernameOrEmail.trim() || !password.trim()) {
+      setError('Username/Email and Password are required.')
+      return
+    }
+
     try {
       const response = await fetch(`${API_BASE}/accounts/${editingAccount.id}`, {
         method: 'PUT',
@@ -112,9 +112,8 @@ export default function Accounts() {
           'Authorization': `Bearer ${user.token}`
         },
         body: JSON.stringify({
-          instagram_username: username.trim(),
-          access_token: accessToken.trim(),
-          refresh_token: refreshToken.trim() || null
+          instagram_username_or_email: usernameOrEmail.trim(),
+          password: password.trim()
         })
       })
 
@@ -125,9 +124,8 @@ export default function Accounts() {
 
       setSuccess('Account credentials updated directly.')
       setEditingAccount(null)
-      setUsername('')
-      setAccessToken('')
-      setRefreshToken('')
+      setUsernameOrEmail('')
+      setPassword('')
       fetchAccounts()
     } catch (err) {
       setError(err.message)
@@ -163,10 +161,8 @@ export default function Accounts() {
   // Handle open request form (Standard User)
   const handleOpenRequestForm = (acc) => {
     setSelectedAccountId(acc.id)
-    setReqUsername(acc.instagram_username)
+    setReqUsernameOrEmail(acc.instagram_username_or_email)
     setReqPassword('')
-    setReqAccessToken('')
-    setReqRefreshToken('')
     setReqReason('')
     setIsRequestFormOpen(true)
   }
@@ -177,8 +173,8 @@ export default function Accounts() {
     setError('')
     setSuccess('')
 
-    if (!reqAccessToken.trim() || !reqReason.trim()) {
-      setError('New Access Token and Reason for Update are required.')
+    if (!reqUsernameOrEmail.trim() || !reqPassword.trim() || !reqReason.trim()) {
+      setError('All fields are required to request a credential update.')
       return
     }
 
@@ -191,10 +187,8 @@ export default function Accounts() {
         },
         body: JSON.stringify({
           instagram_account_id: selectedAccountId,
-          requested_username: reqUsername.trim(),
-          requested_password: reqPassword.trim() || null,
-          requested_access_token: reqAccessToken.trim(),
-          requested_refresh_token: reqRefreshToken.trim() || null,
+          requested_username_or_email: reqUsernameOrEmail.trim(),
+          requested_password: reqPassword.trim(),
           reason: reqReason.trim()
         })
       })
@@ -207,10 +201,8 @@ export default function Accounts() {
       setSuccess('Credential update request submitted successfully. Awaiting Super Admin review.')
       setIsRequestFormOpen(false)
       setSelectedAccountId(null)
-      setReqUsername('')
+      setReqUsernameOrEmail('')
       setReqPassword('')
-      setReqAccessToken('')
-      setReqRefreshToken('')
       setReqReason('')
     } catch (err) {
       setError(err.message)
@@ -219,10 +211,17 @@ export default function Accounts() {
 
   const handleOpenEdit = (acc) => {
     setEditingAccount(acc)
-    setUsername(acc.instagram_username)
-    setAccessToken('') // clear input for security
-    setRefreshToken('')
+    setUsernameOrEmail(acc.instagram_username_or_email)
+    setPassword('')
     setIsAddFormOpen(false)
+  }
+
+  const getMetricBadgeClass = (status) => {
+    switch (status) {
+      case 'SUCCESS': return 'badge-success'
+      case 'FAILED': return 'badge-danger'
+      default: return 'badge-pending'
+    }
   }
 
   return (
@@ -257,49 +256,37 @@ export default function Accounts() {
       {/* Add / Connect Account Form */}
       {isAddFormOpen && (
         <div className="glass-card" style={{ marginBottom: '2rem' }}>
-          <h2 style={{ fontSize: '1.25rem', marginBottom: '1.5rem' }}>Connect Instagram Business Account</h2>
+          <h2 style={{ fontSize: '1.25rem', marginBottom: '1.5rem' }}>Connect Instagram Account</h2>
           <form onSubmit={handleAddAccount} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" htmlFor="acc-username">Instagram Username (Handle)</label>
+              <label className="form-label" htmlFor="acc-username">Instagram Username or Email</label>
               <input
                 id="acc-username"
                 type="text"
                 required
                 className="form-input"
-                placeholder="e.g. tech_trends_daily"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Username or email address"
+                value={usernameOrEmail}
+                onChange={(e) => setUsernameOrEmail(e.target.value)}
               />
             </div>
 
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" htmlFor="acc-token">Graph Access Token</label>
+              <label className="form-label" htmlFor="acc-password">Instagram Password</label>
               <input
-                id="acc-token"
+                id="acc-password"
                 type="password"
                 required
                 className="form-input"
-                placeholder="Paste Page/User Access Token"
-                value={accessToken}
-                onChange={(e) => setAccessToken(e.target.value)}
-              />
-            </div>
-
-            <div className="form-group" style={{ marginBottom: 0, gridColumn: 'span 2' }}>
-              <label className="form-label" htmlFor="acc-refresh">Refresh Token (Optional)</label>
-              <input
-                id="acc-refresh"
-                type="password"
-                className="form-input"
-                placeholder="Paste Refresh Token if offline access is enabled"
-                value={refreshToken}
-                onChange={(e) => setRefreshToken(e.target.value)}
+                placeholder="Account password (will be encrypted)"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
               />
             </div>
 
             <div style={{ gridColumn: 'span 2', display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
               <button type="button" onClick={() => setIsAddFormOpen(false)} className="btn btn-secondary">Cancel</button>
-              <button type="submit" className="btn btn-primary">Connect Account</button>
+              <button type="submit" className="btn btn-primary">Connect Credentials</button>
             </div>
           </form>
         </div>
@@ -308,48 +295,36 @@ export default function Accounts() {
       {/* Super Admin Edit Account Form */}
       {editingAccount && (
         <div className="glass-card" style={{ marginBottom: '2rem' }}>
-          <h2 style={{ fontSize: '1.25rem', marginBottom: '1.5rem' }}>Modify Account Credentials: @{editingAccount.instagram_username}</h2>
+          <h2 style={{ fontSize: '1.25rem', marginBottom: '1.5rem' }}>Modify Account: {editingAccount.instagram_username_or_email}</h2>
           <form onSubmit={handleDirectUpdate} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" htmlFor="edit-username">Instagram Username (Handle)</label>
+              <label className="form-label" htmlFor="edit-username">Instagram Username or Email</label>
               <input
                 id="edit-username"
                 type="text"
                 required
                 className="form-input"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                value={usernameOrEmail}
+                onChange={(e) => setUsernameOrEmail(e.target.value)}
               />
             </div>
 
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" htmlFor="edit-token">New Graph Access Token</label>
+              <label className="form-label" htmlFor="edit-password">New Instagram Password</label>
               <input
-                id="edit-token"
+                id="edit-password"
                 type="password"
                 required
                 className="form-input"
-                placeholder="Paste new access token"
-                value={accessToken}
-                onChange={(e) => setAccessToken(e.target.value)}
-              />
-            </div>
-
-            <div className="form-group" style={{ marginBottom: 0, gridColumn: 'span 2' }}>
-              <label className="form-label" htmlFor="edit-refresh">New Refresh Token (Optional)</label>
-              <input
-                id="edit-refresh"
-                type="password"
-                className="form-input"
-                placeholder="Paste new refresh token"
-                value={refreshToken}
-                onChange={(e) => setRefreshToken(e.target.value)}
+                placeholder="Enter new password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
               />
             </div>
 
             <div style={{ gridColumn: 'span 2', display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
               <button type="button" onClick={() => setEditingAccount(null)} className="btn btn-secondary">Cancel</button>
-              <button type="submit" className="btn btn-primary">Save Changes</button>
+              <button type="submit" className="btn btn-primary">Save Credentials</button>
             </div>
           </form>
         </div>
@@ -358,54 +333,30 @@ export default function Accounts() {
       {/* Submit Update Request Form (Standard User) */}
       {isRequestFormOpen && (
         <div className="glass-card" style={{ marginBottom: '2rem' }}>
-          <h2 style={{ fontSize: '1.25rem', marginBottom: '1.5rem' }}>Request Credential Update: @{reqUsername}</h2>
+          <h2 style={{ fontSize: '1.25rem', marginBottom: '1.5rem' }}>Request Credential Update: {reqUsernameOrEmail}</h2>
           <form onSubmit={handleRequestSubmit} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" htmlFor="req-username">Instagram Username</label>
+              <label className="form-label" htmlFor="req-username">Instagram Username or Email</label>
               <input
                 id="req-username"
                 type="text"
                 required
                 className="form-input"
-                value={reqUsername}
-                onChange={(e) => setReqUsername(e.target.value)}
+                value={reqUsernameOrEmail}
+                onChange={(e) => setReqUsernameOrEmail(e.target.value)}
               />
             </div>
 
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" htmlFor="req-password">Instagram Account Password (Optional)</label>
+              <label className="form-label" htmlFor="req-password">New Instagram Password</label>
               <input
                 id="req-password"
                 type="password"
-                className="form-input"
-                placeholder="Optional"
-                value={reqPassword}
-                onChange={(e) => setReqPassword(e.target.value)}
-              />
-            </div>
-
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" htmlFor="req-token">New Access Token</label>
-              <input
-                id="req-token"
-                type="password"
                 required
                 className="form-input"
-                placeholder="Paste new Page Access Token"
-                value={reqAccessToken}
-                onChange={(e) => setReqAccessToken(e.target.value)}
-              />
-            </div>
-
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" htmlFor="req-refresh">New Refresh Token (Optional)</label>
-              <input
-                id="req-refresh"
-                type="password"
-                className="form-input"
-                placeholder="Paste new Refresh Token"
-                value={reqRefreshToken}
-                onChange={(e) => setReqRefreshToken(e.target.value)}
+                placeholder="Enter new password"
+                value={reqPassword}
+                onChange={(e) => setReqPassword(e.target.value)}
               />
             </div>
 
@@ -416,7 +367,7 @@ export default function Accounts() {
                 required
                 className="form-input"
                 rows={3}
-                placeholder="Explain why credentials need to be updated (e.g. Expired token, password reset, etc.)"
+                placeholder="Explain why credentials need to be updated (e.g. Password changed, login failure, security lock, etc.)"
                 value={reqReason}
                 onChange={(e) => setReqReason(e.target.value)}
               />
@@ -442,33 +393,40 @@ export default function Accounts() {
           <table>
             <thead>
               <tr>
-                <th>Username</th>
+                <th>Username/Email</th>
                 {isSuperAdmin && <th>User ID</th>}
                 <th>Status</th>
+                <th>Last Login</th>
+                <th>Last Publish</th>
                 <th>Security Health</th>
-                <th>Connected At</th>
                 <th style={{ textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {accounts.map(acc => (
                 <tr key={acc.id}>
-                  <td style={{ fontWeight: 600 }}>@{acc.instagram_username}</td>
+                  <td style={{ fontWeight: 600 }}>{acc.instagram_username_or_email}</td>
                   {isSuperAdmin && <td style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>User #{acc.user_id}</td>}
                   <td>
-                    <span className={`badge ${acc.status === 'ACTIVE' ? 'badge-success' : 'badge-danger'}`}>
-                      {acc.status === 'ACTIVE' ? <Check size={10} /> : <X size={10} />}
+                    <span className={`badge ${acc.status === 'ACTIVE' ? 'badge-success' : acc.status === 'LOCKED' ? 'badge-danger' : 'badge-pending'}`}>
                       {acc.status}
+                    </span>
+                  </td>
+                  <td>
+                    <span className={`badge ${getMetricBadgeClass(acc.last_login_status)}`}>
+                      {acc.last_login_status}
+                    </span>
+                  </td>
+                  <td>
+                    <span className={`badge ${getMetricBadgeClass(acc.last_publish_status)}`}>
+                      {acc.last_publish_status}
                     </span>
                   </td>
                   <td>
                     <span style={{ color: 'var(--success)', fontSize: '0.8125rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                       <span style={{ width: '6px', height: '6px', background: 'var(--success)', borderRadius: '50%' }}></span>
-                      Encrypted (Secure)
+                      Encrypted Password
                     </span>
-                  </td>
-                  <td style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
-                    {new Date(acc.created_at).toLocaleDateString()}
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     {isSuperAdmin ? (

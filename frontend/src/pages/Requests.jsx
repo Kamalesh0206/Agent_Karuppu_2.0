@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { useAuth } from '../App'
-import { RefreshCw, CheckCircle, XCircle, AlertCircle, Eye, MessageSquare } from 'lucide-react'
+import { RefreshCw, CheckCircle, XCircle, AlertCircle, Eye, MessageSquare, Key, User } from 'lucide-react'
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from '../config'
 
 export default function Requests() {
   const { user } = useAuth()
@@ -116,7 +116,7 @@ export default function Requests() {
       {isSuperAdmin && selectedRequest && (
         <div className="glass-card" style={{ marginBottom: '2rem' }}>
           <h2 style={{ fontSize: '1.25rem', marginBottom: '1rem', borderBottom: '1px solid var(--border-light)', paddingBottom: '0.5rem' }}>
-            Review Request ID #{selectedRequest.id} (For @{selectedRequest.requested_username})
+            Review Request ID #{selectedRequest.id} (For {selectedRequest.requested_username_or_email})
           </h2>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '2rem', marginBottom: '1.5rem' }}>
@@ -129,9 +129,9 @@ export default function Requests() {
               </div>
 
               <div>
-                <span style={{ color: 'var(--text-muted)' }}>Access Token:</span>
-                <span style={{ display: 'block', wordBreak: 'break-all', fontSize: '0.75rem', fontFamily: 'monospace', background: 'rgba(0,0,0,0.3)', padding: '0.5rem', borderRadius: '6px', marginTop: '0.25rem' }}>
-                  {selectedRequest.requested_access_token}
+                <span style={{ color: 'var(--text-muted)' }}>Requested Password:</span>
+                <span style={{ display: 'block', wordBreak: 'break-all', fontSize: '0.8125rem', color: 'var(--accent-pink)', background: 'rgba(0,0,0,0.3)', padding: '0.5rem', borderRadius: '6px', marginTop: '0.25rem', fontWeight: 600 }}>
+                  {selectedRequest.requested_password || "No change requested"}
                 </span>
               </div>
             </div>
@@ -152,7 +152,7 @@ export default function Requests() {
           <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
             <button type="button" onClick={() => { setSelectedRequest(null); setAdminComments(''); }} className="btn btn-secondary" disabled={processing}>Cancel</button>
             <button type="button" onClick={() => handleProcessRequest('Rejected')} className="btn btn-danger" disabled={processing}>Reject Request</button>
-            <button type="button" onClick={() => handleProcessRequest('Approved')} className="btn btn-primary" style={{ background: 'var(--success)', boxShadow: '0 4px 15px rgba(16, 185, 129, 0.3)' }} disabled={processing}>Approve & Rotate Keys</button>
+            <button type="button" onClick={() => handleProcessRequest('Approved')} className="btn btn-primary" style={{ background: 'var(--success)', boxShadow: '0 4px 15px rgba(16, 185, 129, 0.3)' }} disabled={processing}>Approve & Rotate Credentials</button>
           </div>
         </div>
       )}
@@ -171,7 +171,7 @@ export default function Requests() {
               <tr>
                 <th>Req ID</th>
                 {isSuperAdmin && <th>User ID</th>}
-                <th>Target Username</th>
+                <th>Requested Account</th>
                 <th>Reason</th>
                 <th>Submitted Date</th>
                 <th>Status</th>
@@ -183,7 +183,7 @@ export default function Requests() {
                 <tr key={req.id}>
                   <td style={{ color: 'var(--text-muted)' }}>#{req.id}</td>
                   {isSuperAdmin && <td style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>User #{req.user_id}</td>}
-                  <td style={{ fontWeight: 600 }}>@{req.requested_username}</td>
+                  <td style={{ fontWeight: 600 }}>{req.requested_username_or_email}</td>
                   <td style={{ maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={req.reason}>
                     {req.reason}
                   </td>

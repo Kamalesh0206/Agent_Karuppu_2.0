@@ -2,7 +2,7 @@ from celery import Celery
 from .config import settings
 
 celery_app = Celery(
-    "instagram_multi_publisher",
+    "agent_karuppu",
     broker=settings.REDIS_URL,
     backend=settings.REDIS_URL,
     include=["app.tasks"]

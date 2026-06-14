@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useAuth } from '../App'
 import { Terminal, RefreshCw, Trash } from 'lucide-react'
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from '../config'
 
 export default function Logs() {
   const { user } = useAuth()
@@ -55,7 +55,7 @@ export default function Logs() {
       <div className="glass-card" style={{ padding: '1.5rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', borderBottom: '1px solid var(--border-light)', paddingBottom: '0.75rem' }}>
           <Terminal size={18} style={{ color: 'var(--primary)' }} />
-          <span style={{ fontSize: '0.875rem', fontWeight: 600, fontFamily: 'monospace' }}>terminal_stream@ig-publisher:~$ tail -n 100 system.log</span>
+          <span style={{ fontSize: '0.875rem', fontWeight: 600, fontFamily: 'monospace' }}>terminal_stream@agent-karuppu:~$ tail -n 100 system.log</span>
         </div>
 
         <div className="console-container">

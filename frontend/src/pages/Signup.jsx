@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { KeyRound, User, UserPlus, Mail, Phone, FileText } from 'lucide-react'
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from '../config'
 
 export default function Signup() {
   const [fullName, setFullName] = useState('')
@@ -19,6 +19,12 @@ export default function Signup() {
     e.preventDefault()
     setError('')
     setLoading(true)
+
+    if (!email.trim() && !mobileNumber.trim()) {
+      setError('Either Email Address or Mobile Number must be provided.')
+      setLoading(false)
+      return
+    }
 
     if (fullName.trim().length < 3) {
       setError('Full Name must be at least 3 characters long.')
@@ -56,8 +62,8 @@ export default function Signup() {
         throw new Error(data.detail || 'Registration failed.')
       }
 
-      // Redirect to verification OTP page, passing the username
-      navigate('/verify', { state: { username: username.trim() } })
+      // Redirect to login page with pending approval message
+      navigate('/login', { state: { message: 'Registration successful! Your account is now pending approval by the Super Admin.' } })
     } catch (err) {
       setError(err.message)
     } finally {
@@ -105,10 +111,9 @@ export default function Signup() {
               <input
                 id="email"
                 type="email"
-                required
                 className="form-input"
                 style={{ paddingLeft: '2.5rem' }}
-                placeholder="Enter email address"
+                placeholder="Enter email address (optional)"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
               />
@@ -122,10 +127,9 @@ export default function Signup() {
               <input
                 id="mobile"
                 type="text"
-                required
                 className="form-input"
                 style={{ paddingLeft: '2.5rem' }}
-                placeholder="Enter mobile number"
+                placeholder="Enter mobile number (optional)"
                 value={mobileNumber}
                 onChange={(e) => setMobileNumber(e.target.value)}
               />

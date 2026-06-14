@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../App'
 import { KeyRound, User } from 'lucide-react'
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from '../config'
 
 export default function Login() {
   const [username, setUsername] = useState('')
@@ -48,7 +48,7 @@ export default function Login() {
       <div className="glass-card login-card">
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
           <div className="logo-icon" style={{ margin: '0 auto 1rem', width: '56px', height: '56px', fontSize: '1.75rem' }}>📸</div>
-          <h1 style={{ fontSize: '1.75rem', marginBottom: '0.5rem' }}>IG Multi-Publisher</h1>
+          <h1 style={{ fontSize: '1.75rem', marginBottom: '0.5rem' }}>Agent Karuppu</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Sign in to manage and automate your feeds</p>
         </div>
 
@@ -66,7 +66,7 @@ export default function Login() {
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label className="form-label" htmlFor="username">Username</label>
+            <label className="form-label" htmlFor="username">Username / Email / Mobile</label>
             <div style={{ position: 'relative' }}>
               <User size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
               <input
@@ -75,7 +75,7 @@ export default function Login() {
                 required
                 className="form-input"
                 style={{ paddingLeft: '2.5rem' }}
-                placeholder="Enter username"
+                placeholder="Enter username, email, or mobile"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
               />
@@ -109,33 +109,18 @@ export default function Login() {
           </button>
         </form>
 
-        <div style={{ marginTop: '1.5rem', textAlign: 'center', fontSize: '0.875rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          <div>
-            <span style={{ color: 'var(--text-muted)' }}>Don't have an account? </span>
-            <a
-              href="/signup"
-              onClick={(e) => {
-                e.preventDefault()
-                navigate('/signup')
-              }}
-              style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: 600 }}
-            >
-              Sign up
-            </a>
-          </div>
-          <div>
-            <span style={{ color: 'var(--text-muted)' }}>Registered but not verified? </span>
-            <a
-              href="/verify"
-              onClick={(e) => {
-                e.preventDefault()
-                navigate('/verify')
-              }}
-              style={{ color: 'var(--accent-cyan)', textDecoration: 'none', fontWeight: 600 }}
-            >
-              Verify OTP
-            </a>
-          </div>
+        <div style={{ marginTop: '1.5rem', textAlign: 'center', fontSize: '0.875rem' }}>
+          <span style={{ color: 'var(--text-muted)' }}>Don't have an account? </span>
+          <a
+            href="/signup"
+            onClick={(e) => {
+              e.preventDefault()
+              navigate('/signup')
+            }}
+            style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: 600 }}
+          >
+            Sign up
+          </a>
         </div>
       </div>
     </div>

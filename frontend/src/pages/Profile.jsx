@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useAuth } from '../App'
 import { User, Mail, Phone, Lock, CheckCircle2, AlertTriangle, ShieldCheck } from 'lucide-react'
 
-const API_BASE = "http://localhost:8000"
+import { API_BASE } from '../config'
 
 export default function Profile() {
   const { user, updateProfileInStorage } = useAuth()
@@ -36,8 +36,8 @@ export default function Profile() {
       if (response.ok) {
         setProfile(data)
         setFullName(data.full_name)
-        setEmail(data.email)
-        setMobileNumber(data.mobile_number)
+        setEmail(data.email || '')
+        setMobileNumber(data.mobile_number || '')
       } else {
         setProfileError(data.detail || 'Failed to load profile details')
       }
@@ -55,6 +55,12 @@ export default function Profile() {
     setProfileError('')
     setProfileSuccess('')
     setLoading(true)
+
+    if (!email.trim() && !mobileNumber.trim()) {
+      setProfileError('Either Email Address or Mobile Number must be provided.')
+      setLoading(false)
+      return
+    }
 
     try {
       const response = await fetch(`${API_BASE}/profile`, {
@@ -202,7 +208,6 @@ export default function Profile() {
                 <input
                   id="profile-email"
                   type="email"
-                  required
                   className="form-input"
                   style={{ paddingLeft: '2.5rem' }}
                   placeholder="Enter email address"
@@ -219,7 +224,6 @@ export default function Profile() {
                 <input
                   id="profile-mobile"
                   type="text"
-                  required
                   className="form-input"
                   style={{ paddingLeft: '2.5rem' }}
                   placeholder="Enter mobile number"

@@ -8,19 +8,15 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     full_name = Column(String, nullable=False)
-    email = Column(String, unique=True, index=True, nullable=False)
-    mobile_number = Column(String, unique=True, index=True, nullable=False)
+    email = Column(String, unique=True, index=True, nullable=True)
+    mobile_number = Column(String, unique=True, index=True, nullable=True)
     username = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
     role = Column(String, default="User", nullable=False)  # "Super Admin", "User"
     status = Column(String, default="Pending Approval", nullable=False)  # "Pending Approval", "Approved", "Rejected", "Deactivated"
-    email_verified = Column(Boolean, default=False, nullable=False)
-    mobile_verified = Column(Boolean, default=False, nullable=False)
+    email_verified = Column(Boolean, default=True, nullable=False)  # Defaults to True as OTP is removed
+    mobile_verified = Column(Boolean, default=True, nullable=False) # Defaults to True as OTP is removed
     publishing_permission = Column(Boolean, default=True, nullable=False)
-    
-    # OTP fields (stored temporarily for registration verification verification)
-    email_otp = Column(String, nullable=True)
-    mobile_otp = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
@@ -36,10 +32,11 @@ class InstagramAccount(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    instagram_username = Column(String, nullable=False)
-    access_token = Column(Text, nullable=False)  # Encrypted
-    refresh_token = Column(Text, nullable=True)   # Encrypted
-    status = Column(String, default="ACTIVE", nullable=False)  # "ACTIVE", "INACTIVE"
+    instagram_username_or_email = Column(String, nullable=False)
+    encrypted_password = Column(Text, nullable=False)
+    status = Column(String, default="ACTIVE", nullable=False)  # "ACTIVE", "INACTIVE", "LOCKED"
+    last_login_status = Column(String, default="NEVER_LOGGED", nullable=False)  # "SUCCESS", "FAILED"
+    last_publish_status = Column(String, default="NEVER_PUBLISHED", nullable=False)  # "SUCCESS", "FAILED"
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
@@ -54,10 +51,8 @@ class CredentialUpdateRequest(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     instagram_account_id = Column(Integer, ForeignKey("instagram_accounts.id", ondelete="SET NULL"), nullable=True)
-    requested_username = Column(String, nullable=False)
-    requested_password = Column(String, nullable=True)
-    requested_access_token = Column(Text, nullable=False)
-    requested_refresh_token = Column(Text, nullable=True)
+    requested_username_or_email = Column(String, nullable=False)
+    requested_password = Column(String, nullable=True) # Plain text, encrypted upon approval before saving
     reason = Column(Text, nullable=False)
     status = Column(String, default="Pending", nullable=False)  # "Pending", "Approved", "Rejected"
     admin_comments = Column(Text, nullable=True)
@@ -78,7 +73,11 @@ class Post(Base):
     caption = Column(Text, nullable=True)
     hashtags = Column(Text, nullable=True)
     publish_status = Column(String, default="Pending", nullable=False)  # "Pending", "Success", "Failed"
+    failure_reason = Column(Text, nullable=True)
+    job_id = Column(String, nullable=True)
+    progress_percent = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
     # Relationships
     user = relationship("User", back_populates="posts")

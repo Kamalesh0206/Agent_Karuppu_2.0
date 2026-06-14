@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useAuth } from '../App'
-import { Check, X, ShieldAlert, ShieldCheck, Ban, UserCheck, RefreshCw, Terminal, Eye } from 'lucide-react'
-
-const API_BASE = "http://localhost:8000"
+import { Check, X, ShieldAlert, ShieldCheck, Ban, UserCheck, RefreshCw, Terminal, Eye, Copy } from 'lucide-react'
+import { API_BASE, APP_URL, REGISTRATION_URL, LOGIN_URL } from '../config'
 
 export default function Admin() {
   const { user } = useAuth()
@@ -11,6 +10,13 @@ export default function Admin() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [copiedKey, setCopiedKey] = useState('')
+
+  const handleCopy = (text, key) => {
+    navigator.clipboard.writeText(text)
+    setCopiedKey(key)
+    setTimeout(() => setCopiedKey(''), 2000)
+  }
   
   // Modal log view states
   const [activeUserLogs, setActiveUserLogs] = useState(null)
@@ -167,6 +173,36 @@ export default function Admin() {
         </div>
       )}
 
+      {/* System Info & Public Access URLs */}
+      <section className="glass-card" style={{ marginBottom: '2rem' }}>
+        <h2 style={{ fontSize: '1.25rem', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <ShieldCheck size={18} style={{ color: 'var(--primary)' }} /> System Info & Public Access URLs
+        </h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+          {[
+            { label: 'Application URL', value: APP_URL, key: 'app' },
+            { label: 'API URL', value: API_BASE, key: 'api' },
+            { label: 'Registration URL', value: REGISTRATION_URL, key: 'reg' },
+            { label: 'Login URL', value: LOGIN_URL, key: 'login' }
+          ].map(item => (
+            <div key={item.key} style={{ background: 'rgba(255, 255, 255, 0.03)', border: '1px solid var(--border-light)', padding: '1rem', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{item.label}</span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.875rem', fontFamily: 'monospace', color: 'var(--text-main)', wordBreak: 'break-all' }}>{item.value}</span>
+                <button
+                  onClick={() => handleCopy(item.value, item.key)}
+                  className="btn btn-secondary"
+                  style={{ padding: '0.35rem', borderRadius: '6px', minWidth: '32px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                  title="Copy to Clipboard"
+                >
+                  {copiedKey === item.key ? <Check size={14} style={{ color: 'var(--success)' }} /> : <Copy size={14} />}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
       {/* 1. Pending Approvals Queue */}
       <section className="glass-card" style={{ marginBottom: '2rem' }}>
         <h2 style={{ fontSize: '1.25rem', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -191,8 +227,8 @@ export default function Admin() {
                 {pendingApprovals.map(u => (
                   <tr key={u.id}>
                     <td style={{ fontWeight: 600 }}>{u.full_name}</td>
-                    <td>{u.email}</td>
-                    <td>{u.mobile_number}</td>
+                    <td>{u.email || <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>N/A</span>}</td>
+                    <td>{u.mobile_number || <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>N/A</span>}</td>
                     <td style={{ color: 'var(--primary)' }}>@{u.username}</td>
                     <td style={{ textAlign: 'right' }}>
                       <div style={{ display: 'inline-flex', gap: '0.5rem' }}>
@@ -246,7 +282,7 @@ export default function Admin() {
                   <tr key={u.id}>
                     <td style={{ fontWeight: 600 }}>{u.full_name}</td>
                     <td style={{ color: 'var(--primary)' }}>@{u.username}</td>
-                    <td>{u.email}</td>
+                    <td>{u.email || <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>N/A</span>}</td>
                     <td>
                       <span className={`badge ${u.status === 'Approved' ? 'badge-success' : 'badge-danger'}`}>
                         {u.status}

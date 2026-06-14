@@ -2,7 +2,7 @@ import os
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "Instagram Multi-Account Publisher"
+    PROJECT_NAME: str = "Agent Karuppu"
     
     # Database Settings
     DATABASE_URL: str = "sqlite:///./ig_publisher.db"

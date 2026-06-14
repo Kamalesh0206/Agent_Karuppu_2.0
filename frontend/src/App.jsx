@@ -5,7 +5,6 @@ import { LayoutDashboard, Users, Terminal, LogOut, KeyRound, User, ClipboardList
 // Pages
 import Login from './pages/Login'
 import Signup from './pages/Signup'
-import OTP from './pages/OTP'
 import Dashboard from './pages/Dashboard'
 import Accounts from './pages/Accounts'
 import Requests from './pages/Requests'
@@ -56,7 +55,7 @@ const Layout = () => {
       <aside className="sidebar">
         <NavLink to="/dashboard" className="logo-container">
           <div className="logo-icon">📸</div>
-          <span className="logo-text">IG Publisher</span>
+          <span className="logo-text">Agent Karuppu</span>
         </NavLink>
 
         <nav style={{ flex: 1 }}>
@@ -180,6 +179,25 @@ function App() {
     setUser(null)
   }
 
+  useEffect(() => {
+    const { fetch: originalFetch } = window
+    window.fetch = async (...args) => {
+      const response = await originalFetch(...args)
+      if (response.status === 401) {
+        const firstArg = args[0]
+        const url = typeof firstArg === 'string' ? firstArg : (firstArg && firstArg.url) || ''
+        const isAuthRequest = url.includes('/login') || url.includes('/signup')
+        if (!isAuthRequest) {
+          logout()
+        }
+      }
+      return response
+    }
+    return () => {
+      window.fetch = originalFetch
+    }
+  }, [])
+
   const updateProfileInStorage = (updatedUsername) => {
     localStorage.setItem('username', updatedUsername)
     setUser(prev => prev ? { ...prev, username: updatedUsername } : null)
@@ -191,7 +209,6 @@ function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
-          <Route path="/verify" element={<OTP />} />
           <Route
             path="/*"
             element={

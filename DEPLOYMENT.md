@@ -1,6 +1,6 @@
 # Deployment and Setup Guide
 
-This guide details launching the **Instagram Multi-Account Publisher** locally using Docker Compose, configuring Facebook Page and Instagram Graph API integrations, and using development settings for testing.
+This guide details launching the **Agent Karuppu** platform locally using Docker Compose, configuring Facebook Page and Instagram Graph API integrations, and using development settings for testing.
 
 ---
 
@@ -29,7 +29,7 @@ docker-compose up --build
 ### Step C: Access Dashboard Interfaces
 - **React Frontend**: [http://localhost:3000](http://localhost:3000)
 - **FastAPI API Docs (Swagger)**: [http://localhost:8000/docs](http://localhost:8000/docs)
-- **Postgres Database**: `localhost:5432` (User: `postgres`, Password: `postgres`, DB: `ig_publisher`)
+- **Postgres Database**: `localhost:5432` (User: `postgres`, Password: `postgres`, DB: `agent_karuppu`)
 - **Redis Queue Console**: `localhost:6379`
 
 ### Step D: Login
