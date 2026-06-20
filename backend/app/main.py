@@ -519,6 +519,9 @@ def get_accounts(db: Session = Depends(get_db), current_user: User = Depends(get
                 "last_publish_status": acc.last_publish_status,
                 "decrypted_password": decrypt_token(acc.encrypted_password),
                 "decrypted_access_token": decrypt_token(acc.encrypted_access_token) if acc.encrypted_access_token else None,
+                "instagram_account_id": acc.instagram_account_id,
+                "facebook_page_id": acc.facebook_page_id,
+                "token_expiry_time": acc.token_expiry_time,
                 "created_at": acc.created_at,
                 "updated_at": acc.updated_at
             })
@@ -536,6 +539,9 @@ def get_accounts(db: Session = Depends(get_db), current_user: User = Depends(get
                 "last_publish_status": acc.last_publish_status,
                 "decrypted_password": None,
                 "decrypted_access_token": None,
+                "instagram_account_id": acc.instagram_account_id,
+                "facebook_page_id": acc.facebook_page_id,
+                "token_expiry_time": acc.token_expiry_time,
                 "created_at": acc.created_at,
                 "updated_at": acc.updated_at
             })
