@@ -65,6 +65,8 @@ class InstagramAccountResponse(BaseModel):
     status: str
     last_login_status: str
     last_publish_status: str
+    decrypted_password: Optional[str] = None
+    decrypted_access_token: Optional[str] = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
