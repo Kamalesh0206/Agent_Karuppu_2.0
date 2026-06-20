@@ -615,24 +615,42 @@ def admin_update_account(account_id: int, account_data: InstagramAccountCreate, 
     if not account:
         raise HTTPException(status_code=404, detail="Instagram account not found.")
 
-    # Validate access token before updating
-    from .instagram import InstagramClient, InstagramAPIError
-    try:
-        InstagramClient.verify_token_permissions(account_data.access_token)
-        if not InstagramClient.is_mock_token(account_data.access_token):
-            InstagramClient.verify_account(account_data.access_token)
-    except InstagramAPIError as e:
-        if e.status_code is not None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Access token validation failed: {str(e)}"
-            )
-        else:
-            print(f"[Warning] Network error validating access token: {e}")
+    # Validate access token before updating using the Verification Agent
+    from .instagram import InstagramClient
+    verification_res = InstagramClient.verify_and_resolve_account(
+        username=account_data.instagram_username_or_email,
+        access_token=account_data.access_token,
+        facebook_page_id=account_data.facebook_page_id
+    )
+    
+    if verification_res["status"] == "rejected":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Access token validation failed: {verification_res['reason']}"
+        )
+        
+    resolved_ig_id = verification_res["instagram_account_id"]
+    resolved_page_id = verification_res["facebook_page_id"]
+    resolved_username = verification_res["username"]
+    resolved_expiry = verification_res["token_expiry_time"]
 
-    account.instagram_username_or_email = account_data.instagram_username_or_email
+    # Check duplicate Instagram Account ID in database (excluding the account currently being updated)
+    duplicate = db.query(InstagramAccount).filter(
+        InstagramAccount.instagram_account_id == resolved_ig_id,
+        InstagramAccount.id != account_id
+    ).first()
+    if duplicate:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Account already connected"
+        )
+
+    account.instagram_username_or_email = resolved_username
     account.encrypted_password = encrypt_token(account_data.password)
     account.encrypted_access_token = encrypt_token(account_data.access_token)
+    account.instagram_account_id = resolved_ig_id
+    account.facebook_page_id = resolved_page_id
+    account.token_expiry_time = resolved_expiry
     account.status = "ACTIVE"  # Reset
     account.last_login_status = "NEVER_LOGGED"
     account.last_publish_status = "NEVER_PUBLISHED"
@@ -688,21 +706,34 @@ def create_credential_request(req_data: CredentialUpdateRequestCreate, request: 
         if not acc:
             raise HTTPException(status_code=404, detail="Instagram account not found.")
 
-    # Validate access token if provided
+    # Validate access token using the Verification Agent if provided
+    resolved_page_id = req_data.facebook_page_id
     if req_data.requested_access_token:
-        from .instagram import InstagramClient, InstagramAPIError
-        try:
-            InstagramClient.verify_token_permissions(req_data.requested_access_token)
-            if not InstagramClient.is_mock_token(req_data.requested_access_token):
-                InstagramClient.verify_account(req_data.requested_access_token)
-        except InstagramAPIError as e:
-            if e.status_code is not None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Access token validation failed: {str(e)}"
-                )
-            else:
-                print(f"[Warning] Network error validating access token: {e}")
+        from .instagram import InstagramClient
+        verification_res = InstagramClient.verify_and_resolve_account(
+            username=req_data.requested_username_or_email,
+            access_token=req_data.requested_access_token,
+            facebook_page_id=req_data.facebook_page_id
+        )
+        if verification_res["status"] == "rejected":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Access token validation failed: {verification_res['reason']}"
+            )
+            
+        resolved_ig_id = verification_res["instagram_account_id"]
+        resolved_page_id = verification_res["facebook_page_id"]
+
+        # Check duplicate Instagram Account ID in database (excluding the current account being updated)
+        duplicate = db.query(InstagramAccount).filter(
+            InstagramAccount.instagram_account_id == resolved_ig_id,
+            InstagramAccount.id != req_data.instagram_account_id
+        ).first()
+        if duplicate:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Account already connected"
+            )
 
     new_request = CredentialUpdateRequest(
         user_id=current_user.id,
@@ -710,6 +741,7 @@ def create_credential_request(req_data: CredentialUpdateRequestCreate, request: 
         requested_username_or_email=req_data.requested_username_or_email,
         requested_password=req_data.requested_password, # Plain text stored here for admin inspection
         requested_access_token=req_data.requested_access_token,
+        facebook_page_id=resolved_page_id,
         reason=req_data.reason,
         status="Pending"
     )
@@ -752,25 +784,44 @@ def process_credential_request(req_id: int, process_data: CredentialUpdateReques
         if acc:
             # Validate requested access token if provided
             if req.requested_access_token:
-                from .instagram import InstagramClient, InstagramAPIError
-                try:
-                    InstagramClient.verify_token_permissions(req.requested_access_token)
-                    if not InstagramClient.is_mock_token(req.requested_access_token):
-                        InstagramClient.verify_account(req.requested_access_token)
-                except InstagramAPIError as e:
-                    if e.status_code is not None:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"Access token validation failed: {str(e)}"
-                        )
-                    else:
-                        print(f"[Warning] Network error validating access token: {e}")
+                from .instagram import InstagramClient
+                verification_res = InstagramClient.verify_and_resolve_account(
+                    username=req.requested_username_or_email,
+                    access_token=req.requested_access_token,
+                    facebook_page_id=req.facebook_page_id
+                )
+                if verification_res["status"] == "rejected":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Access token validation failed: {verification_res['reason']}"
+                    )
+                
+                resolved_ig_id = verification_res["instagram_account_id"]
+                resolved_page_id = verification_res["facebook_page_id"]
+                resolved_username = verification_res["username"]
+                resolved_expiry = verification_res["token_expiry_time"]
 
-            acc.instagram_username_or_email = req.requested_username_or_email
+                # Check duplicate Instagram Account ID in database (excluding the target account)
+                duplicate = db.query(InstagramAccount).filter(
+                    InstagramAccount.instagram_account_id == resolved_ig_id,
+                    InstagramAccount.id != req.instagram_account_id
+                ).first()
+                if duplicate:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Account already connected"
+                    )
+
+                acc.instagram_username_or_email = resolved_username
+                acc.instagram_account_id = resolved_ig_id
+                acc.facebook_page_id = resolved_page_id
+                acc.token_expiry_time = resolved_expiry
+                acc.encrypted_access_token = encrypt_token(req.requested_access_token)
+            else:
+                acc.instagram_username_or_email = req.requested_username_or_email
+
             if req.requested_password:
                 acc.encrypted_password = encrypt_token(req.requested_password)
-            if req.requested_access_token:
-                acc.encrypted_access_token = encrypt_token(req.requested_access_token)
             acc.status = "ACTIVE"  # Reset
             acc.last_login_status = "NEVER_LOGGED"
             acc.last_publish_status = "NEVER_PUBLISHED"
