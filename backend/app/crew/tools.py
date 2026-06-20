@@ -350,7 +350,19 @@ def publish_to_instagram(
             )
         
         if account:
-            account.last_publish_status = "FAILED"
+            # Determine if this is an authentication/token verification error
+            is_auth_error = False
+            error_msg_lower = full_error.lower()
+            if isinstance(e, InstagramAPIError):
+                if any(x in error_msg_lower for x in ["permissions check failed", "oauth access token", "cannot parse access token", "error validating access token", "invalid oauth access token", "expired", "revoked"]):
+                    is_auth_error = True
+            
+            if is_auth_error:
+                account.status = "LOCKED"
+                account.last_login_status = "FAILED"
+                account.last_publish_status = "FAILED"
+            else:
+                account.last_publish_status = "FAILED"
             db.commit()
         
         if post_id or account:
