@@ -521,6 +521,21 @@ def create_account(account_data: InstagramAccountCreate, request: Request, db: S
     if existing:
         raise HTTPException(status_code=400, detail=f"Account '{account_data.instagram_username_or_email}' already connected.")
 
+    # Validate access token permissions and linked account
+    from .instagram import InstagramClient, InstagramAPIError
+    try:
+        InstagramClient.verify_token_permissions(account_data.access_token)
+        if not InstagramClient.is_mock_token(account_data.access_token):
+            InstagramClient.verify_account(account_data.access_token)
+    except InstagramAPIError as e:
+        if e.status_code is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Access token validation failed: {str(e)}"
+            )
+        else:
+            print(f"[Warning] Network error validating access token: {e}")
+
     new_account = InstagramAccount(
         user_id=current_user.id,
         instagram_username_or_email=account_data.instagram_username_or_email,
@@ -552,6 +567,21 @@ def admin_update_account(account_id: int, account_data: InstagramAccountCreate, 
     account = db.query(InstagramAccount).filter(InstagramAccount.id == account_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="Instagram account not found.")
+
+    # Validate access token before updating
+    from .instagram import InstagramClient, InstagramAPIError
+    try:
+        InstagramClient.verify_token_permissions(account_data.access_token)
+        if not InstagramClient.is_mock_token(account_data.access_token):
+            InstagramClient.verify_account(account_data.access_token)
+    except InstagramAPIError as e:
+        if e.status_code is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Access token validation failed: {str(e)}"
+            )
+        else:
+            print(f"[Warning] Network error validating access token: {e}")
 
     account.instagram_username_or_email = account_data.instagram_username_or_email
     account.encrypted_password = encrypt_token(account_data.password)
@@ -611,6 +641,22 @@ def create_credential_request(req_data: CredentialUpdateRequestCreate, request: 
         if not acc:
             raise HTTPException(status_code=404, detail="Instagram account not found.")
 
+    # Validate access token if provided
+    if req_data.requested_access_token:
+        from .instagram import InstagramClient, InstagramAPIError
+        try:
+            InstagramClient.verify_token_permissions(req_data.requested_access_token)
+            if not InstagramClient.is_mock_token(req_data.requested_access_token):
+                InstagramClient.verify_account(req_data.requested_access_token)
+        except InstagramAPIError as e:
+            if e.status_code is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Access token validation failed: {str(e)}"
+                )
+            else:
+                print(f"[Warning] Network error validating access token: {e}")
+
     new_request = CredentialUpdateRequest(
         user_id=current_user.id,
         instagram_account_id=req_data.instagram_account_id,
@@ -657,6 +703,22 @@ def process_credential_request(req_id: int, process_data: CredentialUpdateReques
     if process_data.status == "Approved" and req.instagram_account_id:
         acc = db.query(InstagramAccount).filter(InstagramAccount.id == req.instagram_account_id).first()
         if acc:
+            # Validate requested access token if provided
+            if req.requested_access_token:
+                from .instagram import InstagramClient, InstagramAPIError
+                try:
+                    InstagramClient.verify_token_permissions(req.requested_access_token)
+                    if not InstagramClient.is_mock_token(req.requested_access_token):
+                        InstagramClient.verify_account(req.requested_access_token)
+                except InstagramAPIError as e:
+                    if e.status_code is not None:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Access token validation failed: {str(e)}"
+                        )
+                    else:
+                        print(f"[Warning] Network error validating access token: {e}")
+
             acc.instagram_username_or_email = req.requested_username_or_email
             if req.requested_password:
                 acc.encrypted_password = encrypt_token(req.requested_password)
