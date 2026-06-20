@@ -57,6 +57,7 @@ class InstagramAccountCreate(BaseModel):
     instagram_username_or_email: str
     password: str
     access_token: str
+    facebook_page_id: Optional[str] = None
 
 class InstagramAccountResponse(BaseModel):
     id: int
@@ -67,6 +68,9 @@ class InstagramAccountResponse(BaseModel):
     last_publish_status: str
     decrypted_password: Optional[str] = None
     decrypted_access_token: Optional[str] = None
+    instagram_account_id: Optional[str] = None
+    facebook_page_id: Optional[str] = None
+    token_expiry_time: Optional[datetime.datetime] = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
@@ -79,6 +83,7 @@ class CredentialUpdateRequestCreate(BaseModel):
     requested_username_or_email: str
     requested_password: Optional[str] = None
     requested_access_token: Optional[str] = None
+    facebook_page_id: Optional[str] = None
     reason: str
 
 class CredentialUpdateRequestProcess(BaseModel):
@@ -92,6 +97,7 @@ class CredentialUpdateRequestResponse(BaseModel):
     requested_username_or_email: str
     requested_password: Optional[str] = None
     requested_access_token: Optional[str] = None
+    facebook_page_id: Optional[str] = None
     status: str
     reason: str
     admin_comments: Optional[str] = None

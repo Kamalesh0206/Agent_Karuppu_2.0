@@ -134,7 +134,7 @@ def startup_db_setup():
             except Exception as e:
                 print(f"[Migration Warning] SQLite posts table updated_at migration failed: {e}")
     
-    # Check if we need to migrate instagram_accounts table to add encrypted_access_token column
+    # Check if we need to migrate instagram_accounts table to add new columns
     if "instagram_accounts" in inspector.get_table_names():
         ig_cols = {col["name"]: col for col in inspector.get_columns("instagram_accounts")}
         if "encrypted_access_token" not in ig_cols:
@@ -143,9 +143,33 @@ def startup_db_setup():
                     with engine.begin() as conn:
                         conn.execute(text("ALTER TABLE instagram_accounts ADD COLUMN encrypted_access_token TEXT;"))
                 except Exception as e:
-                    print(f"[Migration Warning] SQLite instagram_accounts table migration failed: {e}")
+                    print(f"[Migration Warning] SQLite instagram_accounts encrypted_access_token migration failed: {e}")
+        
+        if "instagram_account_id" not in ig_cols:
+            if settings.DATABASE_URL.startswith("sqlite"):
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(text("ALTER TABLE instagram_accounts ADD COLUMN instagram_account_id VARCHAR;"))
+                except Exception as e:
+                    print(f"[Migration Warning] SQLite instagram_accounts instagram_account_id migration failed: {e}")
+                    
+        if "facebook_page_id" not in ig_cols:
+            if settings.DATABASE_URL.startswith("sqlite"):
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(text("ALTER TABLE instagram_accounts ADD COLUMN facebook_page_id VARCHAR;"))
+                except Exception as e:
+                    print(f"[Migration Warning] SQLite instagram_accounts facebook_page_id migration failed: {e}")
+                    
+        if "token_expiry_time" not in ig_cols:
+            if settings.DATABASE_URL.startswith("sqlite"):
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(text("ALTER TABLE instagram_accounts ADD COLUMN token_expiry_time DATETIME;"))
+                except Exception as e:
+                    print(f"[Migration Warning] SQLite instagram_accounts token_expiry_time migration failed: {e}")
 
-    # Check if we need to migrate credential_update_requests table to add requested_access_token column
+    # Check if we need to migrate credential_update_requests table to add requested_access_token and facebook_page_id columns
     if "credential_update_requests" in inspector.get_table_names():
         req_cols = {col["name"]: col for col in inspector.get_columns("credential_update_requests")}
         if "requested_access_token" not in req_cols:
@@ -154,7 +178,15 @@ def startup_db_setup():
                     with engine.begin() as conn:
                         conn.execute(text("ALTER TABLE credential_update_requests ADD COLUMN requested_access_token TEXT;"))
                 except Exception as e:
-                    print(f"[Migration Warning] SQLite credential_update_requests table migration failed: {e}")
+                    print(f"[Migration Warning] SQLite credential_update_requests requested_access_token migration failed: {e}")
+                    
+        if "facebook_page_id" not in req_cols:
+            if settings.DATABASE_URL.startswith("sqlite"):
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(text("ALTER TABLE credential_update_requests ADD COLUMN facebook_page_id VARCHAR;"))
+                except Exception as e:
+                    print(f"[Migration Warning] SQLite credential_update_requests facebook_page_id migration failed: {e}")
     
     db = SessionLocal()
     try:
