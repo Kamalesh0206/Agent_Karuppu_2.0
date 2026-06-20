@@ -475,8 +475,39 @@ def change_password(pass_data: ChangePasswordRequest, request: Request, db: Sess
 def get_accounts(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """List connected Instagram accounts. Standard users see their own; Super Admin sees all."""
     if current_user.role == "Super Admin":
-        return db.query(InstagramAccount).order_by(InstagramAccount.id.asc()).all()
-    return db.query(InstagramAccount).filter(InstagramAccount.user_id == current_user.id).order_by(InstagramAccount.id.asc()).all()
+        accounts = db.query(InstagramAccount).order_by(InstagramAccount.id.asc()).all()
+        res = []
+        for acc in accounts:
+            res.append({
+                "id": acc.id,
+                "user_id": acc.user_id,
+                "instagram_username_or_email": acc.instagram_username_or_email,
+                "status": acc.status,
+                "last_login_status": acc.last_login_status,
+                "last_publish_status": acc.last_publish_status,
+                "decrypted_password": decrypt_token(acc.encrypted_password),
+                "decrypted_access_token": decrypt_token(acc.encrypted_access_token) if acc.encrypted_access_token else None,
+                "created_at": acc.created_at,
+                "updated_at": acc.updated_at
+            })
+        return res
+    else:
+        accounts = db.query(InstagramAccount).filter(InstagramAccount.user_id == current_user.id).order_by(InstagramAccount.id.asc()).all()
+        res = []
+        for acc in accounts:
+            res.append({
+                "id": acc.id,
+                "user_id": acc.user_id,
+                "instagram_username_or_email": acc.instagram_username_or_email,
+                "status": acc.status,
+                "last_login_status": acc.last_login_status,
+                "last_publish_status": acc.last_publish_status,
+                "decrypted_password": None,
+                "decrypted_access_token": None,
+                "created_at": acc.created_at,
+                "updated_at": acc.updated_at
+            })
+        return res
 
 @app.post("/accounts", response_model=InstagramAccountResponse)
 def create_account(account_data: InstagramAccountCreate, request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
