@@ -101,11 +101,13 @@ class InstagramClient:
         if not token_str.startswith("EAA"):
             if token_str.startswith("IG"):
                 raise InstagramAPIError(
-                    "Invalid token type. The Instagram Graph API for Business publishing requires a Facebook Page Access Token starting with 'EAA'. Tokens starting with 'IG' (Instagram User tokens) are not supported on this endpoint. Please use the Facebook Login flow to generate a Page Access Token."
+                    "Invalid token type. The Instagram Graph API for Business publishing requires a Facebook Page Access Token starting with 'EAA'. Tokens starting with 'IG' (Instagram User tokens) are not supported on this endpoint. Please use the Facebook Login flow to generate a Page Access Token.",
+                    status_code=400
                 )
             else:
                 raise InstagramAPIError(
-                    "Invalid token type. The Instagram Graph API for Business publishing requires a Facebook Page Access Token starting with 'EAA'."
+                    "Invalid token type. The Instagram Graph API for Business publishing requires a Facebook Page Access Token starting with 'EAA'.",
+                    status_code=400
                 )
 
         url = f"{cls.BASE_URL}/me/permissions"
@@ -194,11 +196,13 @@ class InstagramClient:
         if not token_str.startswith("EAA"):
             if token_str.startswith("IG"):
                 raise InstagramAPIError(
-                    "Invalid token type. The Instagram Graph API for Business publishing requires a Facebook Page Access Token starting with 'EAA'. Tokens starting with 'IG' (Instagram User tokens) are not supported on this endpoint. Please use the Facebook Login flow to generate a Page Access Token."
+                    "Invalid token type. The Instagram Graph API for Business publishing requires a Facebook Page Access Token starting with 'EAA'. Tokens starting with 'IG' (Instagram User tokens) are not supported on this endpoint. Please use the Facebook Login flow to generate a Page Access Token.",
+                    status_code=400
                 )
             else:
                 raise InstagramAPIError(
-                    "Invalid token type. The Instagram Graph API for Business publishing requires a Facebook Page Access Token starting with 'EAA'."
+                    "Invalid token type. The Instagram Graph API for Business publishing requires a Facebook Page Access Token starting with 'EAA'.",
+                    status_code=400
                 )
 
         session = cls._requests_retry_session()
