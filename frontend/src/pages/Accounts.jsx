@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useAuth } from '../App'
-import { Plus, Edit2, Trash2, ShieldAlert, Check, X, Key, Lock, ClipboardCheck, AlertTriangle } from 'lucide-react'
+import { Plus, Edit2, Trash2, ShieldAlert, Check, X, Key, Lock, ClipboardCheck, AlertTriangle, Eye, EyeOff } from 'lucide-react'
 
 import { API_BASE } from '../config'
 
@@ -31,6 +31,11 @@ export default function Accounts() {
 
   // Edit Account state (Super Admin only)
   const [editingAccount, setEditingAccount] = useState(null)
+
+  const [showCreds, setShowCreds] = useState({})
+  const toggleShowCreds = (id) => {
+    setShowCreds(prev => ({ ...prev, [id]: !prev[id] }))
+  }
 
   const fetchAccounts = async () => {
     setLoading(true)
