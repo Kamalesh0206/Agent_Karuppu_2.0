@@ -441,3 +441,172 @@ class InstagramClient:
         except requests.exceptions.RequestException as e:
             cls._log_request("GET", url, params=params, error=e)
             raise InstagramAPIError(f"Network error verifying published post: {str(e)}")
+
+    @classmethod
+    def verify_and_resolve_account(cls, username: str, access_token: str, facebook_page_id: str = None) -> dict:
+        """
+        Verify that an Instagram account exists and is eligible to be connected.
+        Workflow:
+        1. Receive username, token, optional Page ID.
+        2. Verify existence using Graph API (or mock).
+        3. Verify account type, linking to FB page, permissions, and token validity.
+        4. Validate that user-supplied username matches the API record.
+        5. Return Success or Failure.
+        """
+        if cls.is_mock_token(access_token):
+            username_lower = username.lower().strip()
+            token_lower = access_token.lower().strip() if access_token else ""
+            
+            if username_lower == "non_existent":
+                return {
+                    "status": "rejected",
+                    "reason": "Account not found"
+                }
+            if "invalid" in token_lower:
+                return {
+                    "status": "rejected",
+                    "reason": "Invalid token"
+                }
+            if "missing_permissions" in token_lower:
+                return {
+                    "status": "rejected",
+                    "reason": "Missing permissions"
+                }
+            if "no_page" in token_lower:
+                return {
+                    "status": "rejected",
+                    "reason": "Instagram account is not linked to a Facebook Page"
+                }
+                
+            # Default mock success
+            import datetime
+            return {
+                "status": "verified",
+                "instagram_account_id": "17841401234567890",
+                "username": username,
+                "account_type": "business",
+                "token_status": "valid",
+                "facebook_page_id": facebook_page_id or "1234567890",
+                "token_expiry_time": datetime.datetime.utcnow() + datetime.timedelta(days=60)
+            }
+
+        try:
+            # 1. Verify token permissions and EAA prefix
+            cls.verify_token_permissions(access_token)
+            
+            # 2. Retrieve linked Instagram Business Account ID and Facebook Page ID
+            session = cls._requests_retry_session()
+            pages_url = f"{cls.BASE_URL}/me/accounts"
+            cls._log_request("GET", pages_url, params={"access_token": access_token})
+            response = session.get(pages_url, params={"access_token": access_token}, timeout=15)
+            cls._log_request("GET", pages_url, params={"access_token": access_token}, response=response)
+            
+            if response.status_code != 200:
+                error_data = response.json().get("error", {})
+                return {
+                    "status": "rejected",
+                    "reason": f"Invalid token: {error_data.get('message', 'Unknown error')}"
+                }
+                
+            pages_data = response.json().get("data", [])
+            if not pages_data:
+                return {
+                    "status": "rejected",
+                    "reason": "Instagram account is not linked to a Facebook Page"
+                }
+                
+            ig_business_id = None
+            resolved_page_id = None
+            
+            # Filter pages if facebook_page_id is provided
+            target_pages = pages_data
+            if facebook_page_id:
+                target_pages = [p for p in pages_data if p.get("id") == facebook_page_id]
+                if not target_pages:
+                    return {
+                        "status": "rejected",
+                        "reason": f"Facebook Page ID {facebook_page_id} is not managed by this account"
+                    }
+                    
+            for page in target_pages:
+                page_id = page.get("id")
+                page_token = page.get("access_token")
+                
+                ig_url = f"{cls.BASE_URL}/{page_id}"
+                ig_params = {
+                    "fields": "instagram_business_account",
+                    "access_token": page_token or access_token
+                }
+                
+                cls._log_request("GET", ig_url, params=ig_params)
+                ig_response = session.get(ig_url, params=ig_params, timeout=15)
+                cls._log_request("GET", ig_url, params=ig_params, response=ig_response)
+                
+                if ig_response.status_code == 200:
+                    ig_data = ig_response.json()
+                    ig_account = ig_data.get("instagram_business_account")
+                    if ig_account:
+                        ig_business_id = ig_account.get("id")
+                        resolved_page_id = page_id
+                        break
+                        
+            if not ig_business_id:
+                return {
+                    "status": "rejected",
+                    "reason": "Instagram account is not linked to a Facebook Page"
+                }
+                
+            # 3. Verify Instagram account existence and eligibility
+            url = f"{cls.BASE_URL}/{ig_business_id}"
+            params = {
+                "fields": "id,username",
+                "access_token": access_token
+            }
+            cls._log_request("GET", url, params=params)
+            response = session.get(url, params=params, timeout=15)
+            cls._log_request("GET", url, params=params, response=response)
+            
+            if response.status_code != 200:
+                return {
+                    "status": "rejected",
+                    "reason": "Account not found"
+                }
+                
+            data = response.json()
+            api_username = data.get("username")
+            if not api_username:
+                return {
+                    "status": "rejected",
+                    "reason": "Account not found"
+                }
+                
+            # 4. Confirm username matches the returned API profile username
+            if username.lower().strip() != api_username.lower().strip():
+                return {
+                    "status": "rejected",
+                    "reason": f"Username does not match the returned account information (expected {api_username})"
+                }
+                
+            import datetime
+            token_expiry = datetime.datetime.utcnow() + datetime.timedelta(days=60)
+            
+            return {
+                "status": "verified",
+                "instagram_account_id": ig_business_id,
+                "username": api_username,
+                "account_type": "business",
+                "token_status": "valid",
+                "facebook_page_id": resolved_page_id,
+                "token_expiry_time": token_expiry
+            }
+            
+        except InstagramAPIError as e:
+            return {
+                "status": "rejected",
+                "reason": str(e)
+            }
+        except Exception as e:
+            return {
+                "status": "rejected",
+                "reason": f"Verification error: {str(e)}"
+            }

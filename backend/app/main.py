@@ -553,26 +553,41 @@ def create_account(account_data: InstagramAccountCreate, request: Request, db: S
     if existing:
         raise HTTPException(status_code=400, detail=f"Account '{account_data.instagram_username_or_email}' already connected.")
 
-    # Validate access token permissions and linked account
-    from .instagram import InstagramClient, InstagramAPIError
-    try:
-        InstagramClient.verify_token_permissions(account_data.access_token)
-        if not InstagramClient.is_mock_token(account_data.access_token):
-            InstagramClient.verify_account(account_data.access_token)
-    except InstagramAPIError as e:
-        if e.status_code is not None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Access token validation failed: {str(e)}"
-            )
-        else:
-            print(f"[Warning] Network error validating access token: {e}")
+    # Validate access token permissions and linked account using the Verification Agent
+    from .instagram import InstagramClient
+    verification_res = InstagramClient.verify_and_resolve_account(
+        username=account_data.instagram_username_or_email,
+        access_token=account_data.access_token,
+        facebook_page_id=account_data.facebook_page_id
+    )
+    
+    if verification_res["status"] == "rejected":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Access token validation failed: {verification_res['reason']}"
+        )
+        
+    resolved_ig_id = verification_res["instagram_account_id"]
+    resolved_page_id = verification_res["facebook_page_id"]
+    resolved_username = verification_res["username"]
+    resolved_expiry = verification_res["token_expiry_time"]
+
+    # Check duplicate Instagram Account ID in database
+    duplicate = db.query(InstagramAccount).filter(InstagramAccount.instagram_account_id == resolved_ig_id).first()
+    if duplicate:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Account already connected"
+        )
 
     new_account = InstagramAccount(
         user_id=current_user.id,
-        instagram_username_or_email=account_data.instagram_username_or_email,
+        instagram_username_or_email=resolved_username,
         encrypted_password=encrypt_token(account_data.password),
         encrypted_access_token=encrypt_token(account_data.access_token),
+        instagram_account_id=resolved_ig_id,
+        facebook_page_id=resolved_page_id,
+        token_expiry_time=resolved_expiry,
         status="ACTIVE",
         last_login_status="NEVER_LOGGED",
         last_publish_status="NEVER_PUBLISHED"
