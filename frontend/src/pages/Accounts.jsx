@@ -449,6 +449,7 @@ export default function Accounts() {
               <tr>
                 <th>Username/Email</th>
                 {isSuperAdmin && <th>User ID</th>}
+                {isSuperAdmin && <th>Decrypted Credentials</th>}
                 <th>Status</th>
                 <th>Last Login</th>
                 <th>Last Publish</th>
@@ -461,6 +462,31 @@ export default function Accounts() {
                 <tr key={acc.id}>
                   <td style={{ fontWeight: 600 }}>{acc.instagram_username_or_email}</td>
                   {isSuperAdmin && <td style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>User #{acc.user_id}</td>}
+                  {isSuperAdmin && (
+                    <td>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.8125rem', minWidth: '150px' }}>
+                        <div>
+                          <span style={{ color: 'var(--text-muted)' }}>Password: </span>
+                          <span style={{ fontFamily: 'monospace', color: 'var(--accent-pink)' }}>{showCreds[acc.id] ? acc.decrypted_password : '••••••••'}</span>
+                        </div>
+                        <div>
+                          <span style={{ color: 'var(--text-muted)' }}>Token: </span>
+                          <span style={{ fontFamily: 'monospace', wordBreak: 'break-all', color: 'var(--accent-pink)' }}>
+                            {showCreds[acc.id] ? (acc.decrypted_access_token || 'None') : '••••••••••••••••'}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => toggleShowCreds(acc.id)}
+                          className="btn btn-secondary"
+                          style={{ padding: '0.15rem 0.4rem', fontSize: '0.7rem', alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', marginTop: '0.25rem' }}
+                        >
+                          {showCreds[acc.id] ? <EyeOff size={11} /> : <Eye size={11} />}
+                          {showCreds[acc.id] ? 'Hide' : 'Reveal'}
+                        </button>
+                      </div>
+                    </td>
+                  )}
                   <td>
                     <span className={`badge ${acc.status === 'ACTIVE' ? 'badge-success' : acc.status === 'LOCKED' ? 'badge-danger' : 'badge-pending'}`}>
                       {acc.status}
