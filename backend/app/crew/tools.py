@@ -98,43 +98,43 @@ def publish_to_instagram(
             db.add(start_log)
             db.commit()
 
-        # Check for simulated failures based on the access token/password
-        sim_errors = {
-            "wrong_password": "Instagram login failed. Invalid username or password.",
-            "fail": "Instagram login failed. Invalid username or password.",
-            "two_factor": "Two-Factor Authentication is enabled on this Instagram account.",
-            "security_challenge": "Instagram security challenge detected. Email verification required.",
-            "checkpoint": "Instagram security checkpoint required.",
-            "locked": "Account temporarily locked.",
-            "session_expired": "Session expired.",
-            "timeout": "Upload timeout.",
-            "unsupported_media": "Unsupported media format.",
-            "network_error": "Network connection failure.",
-            "rate_limit": "Instagram rate limit reached.",
-            "service_unavailable": "Instagram service unavailable.",
-            "automation_error": "Browser automation error.",
-            "element_not_found": "Element not found during login."
-        }
-        
-        pw_lower = access_token.lower().strip()
-        matched_error = None
-        for err_key, err_val in sim_errors.items():
-            if err_key in pw_lower:
-                matched_error = err_val
-                break
-
-        if matched_error:
-            if account and any(k in pw_lower for k in ["wrong_password", "fail", "locked"]):
-                account.last_login_status = "FAILED"
-                account.last_publish_status = "FAILED"
-                account.status = "LOCKED"
-                db.commit()
-            raise InstagramAPIError(f"[SIMULATION] API Error: {matched_error}", status_code=400)
-
         # Determine if simulation mode or real Graph API publishing
         is_mock = InstagramClient.is_mock_token(access_token)
 
         if is_mock:
+            # Check for simulated failures based on the access token/password
+            sim_errors = {
+                "wrong_password": "Instagram login failed. Invalid username or password.",
+                "fail": "Instagram login failed. Invalid username or password.",
+                "two_factor": "Two-Factor Authentication is enabled on this Instagram account.",
+                "security_challenge": "Instagram security challenge detected. Email verification required.",
+                "checkpoint": "Instagram security checkpoint required.",
+                "locked": "Account temporarily locked.",
+                "session_expired": "Session expired.",
+                "timeout": "Upload timeout.",
+                "unsupported_media": "Unsupported media format.",
+                "network_error": "Network connection failure.",
+                "rate_limit": "Instagram rate limit reached.",
+                "service_unavailable": "Instagram service unavailable.",
+                "automation_error": "Browser automation error.",
+                "element_not_found": "Element not found during login."
+            }
+            
+            pw_lower = access_token.lower().strip()
+            matched_error = None
+            for err_key, err_val in sim_errors.items():
+                if err_key in pw_lower:
+                    matched_error = err_val
+                    break
+
+            if matched_error:
+                if account and any(k in pw_lower for k in ["wrong_password", "fail", "locked"]):
+                    account.last_login_status = "FAILED"
+                    account.last_publish_status = "FAILED"
+                    account.status = "LOCKED"
+                    db.commit()
+                raise InstagramAPIError(f"[SIMULATION] API Error: {matched_error}", status_code=400)
+
             # --- SIMULATION MODE ---
             import time
             from ..utils import update_post_progress
