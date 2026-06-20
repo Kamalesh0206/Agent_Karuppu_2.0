@@ -79,15 +79,9 @@ class InstagramClient:
         if not token:
             return True
         token = token.strip()
-        if token.startswith("mock_") or token == "development_token":
+        if token.startswith("mock_") or token == "development_token" or token.startswith("mock"):
             return True
-        # All Facebook/Instagram API access tokens start with 'EAA' or 'IG'. If it starts with either,
-        # it is a real token, so return False (it is not a mock token).
-        if token.startswith("EAA") or token.startswith("IG"):
-            return False
-        # Otherwise, treat it as a mock token to allow seamless local testing with dummy inputs.
-        logger.info("Token does not start with 'EAA' or 'IG'. Treating as mock token.")
-        return True
+        return False
 
     @classmethod
     def verify_token_permissions(cls, access_token: str):
@@ -100,6 +94,19 @@ class InstagramClient:
         if cls.is_mock_token(access_token):
             logger.info("[MOCK] Verifying permissions for access token.")
             return
+
+        # The Instagram Graph API for content publishing runs on Facebook Graph API and requires a Page Access Token starting with 'EAA'.
+        # Instagram User tokens (starting with 'IG') are not supported on this endpoint.
+        token_str = access_token.strip()
+        if not token_str.startswith("EAA"):
+            if token_str.startswith("IG"):
+                raise InstagramAPIError(
+                    "Invalid token type. The Instagram Graph API for Business publishing requires a Facebook Page Access Token starting with 'EAA'. Tokens starting with 'IG' (Instagram User tokens) are not supported on this endpoint. Please use the Facebook Login flow to generate a Page Access Token."
+                )
+            else:
+                raise InstagramAPIError(
+                    "Invalid token type. The Instagram Graph API for Business publishing requires a Facebook Page Access Token starting with 'EAA'."
+                )
 
         url = f"{cls.BASE_URL}/me/permissions"
         params = {"access_token": access_token}
@@ -182,6 +189,17 @@ class InstagramClient:
         if cls.is_mock_token(access_token):
             logger.info("Using mock account verification.")
             return "17841401234567890"
+
+        token_str = access_token.strip()
+        if not token_str.startswith("EAA"):
+            if token_str.startswith("IG"):
+                raise InstagramAPIError(
+                    "Invalid token type. The Instagram Graph API for Business publishing requires a Facebook Page Access Token starting with 'EAA'. Tokens starting with 'IG' (Instagram User tokens) are not supported on this endpoint. Please use the Facebook Login flow to generate a Page Access Token."
+                )
+            else:
+                raise InstagramAPIError(
+                    "Invalid token type. The Instagram Graph API for Business publishing requires a Facebook Page Access Token starting with 'EAA'."
+                )
 
         session = cls._requests_retry_session()
         try:
