@@ -134,6 +134,28 @@ def startup_db_setup():
             except Exception as e:
                 print(f"[Migration Warning] SQLite posts table updated_at migration failed: {e}")
     
+    # Check if we need to migrate instagram_accounts table to add encrypted_access_token column
+    if "instagram_accounts" in inspector.get_table_names():
+        ig_cols = {col["name"]: col for col in inspector.get_columns("instagram_accounts")}
+        if "encrypted_access_token" not in ig_cols:
+            if settings.DATABASE_URL.startswith("sqlite"):
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(text("ALTER TABLE instagram_accounts ADD COLUMN encrypted_access_token TEXT;"))
+                except Exception as e:
+                    print(f"[Migration Warning] SQLite instagram_accounts table migration failed: {e}")
+
+    # Check if we need to migrate credential_update_requests table to add requested_access_token column
+    if "credential_update_requests" in inspector.get_table_names():
+        req_cols = {col["name"]: col for col in inspector.get_columns("credential_update_requests")}
+        if "requested_access_token" not in req_cols:
+            if settings.DATABASE_URL.startswith("sqlite"):
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(text("ALTER TABLE credential_update_requests ADD COLUMN requested_access_token TEXT;"))
+                except Exception as e:
+                    print(f"[Migration Warning] SQLite credential_update_requests table migration failed: {e}")
+    
     db = SessionLocal()
     try:
         # Seed the single Super Admin account
@@ -472,6 +494,7 @@ def create_account(account_data: InstagramAccountCreate, request: Request, db: S
         user_id=current_user.id,
         instagram_username_or_email=account_data.instagram_username_or_email,
         encrypted_password=encrypt_token(account_data.password),
+        encrypted_access_token=encrypt_token(account_data.access_token),
         status="ACTIVE",
         last_login_status="NEVER_LOGGED",
         last_publish_status="NEVER_PUBLISHED"
@@ -501,6 +524,7 @@ def admin_update_account(account_id: int, account_data: InstagramAccountCreate, 
 
     account.instagram_username_or_email = account_data.instagram_username_or_email
     account.encrypted_password = encrypt_token(account_data.password)
+    account.encrypted_access_token = encrypt_token(account_data.access_token)
     account.status = "ACTIVE"  # Reset
     account.last_login_status = "NEVER_LOGGED"
     account.last_publish_status = "NEVER_PUBLISHED"
@@ -561,6 +585,7 @@ def create_credential_request(req_data: CredentialUpdateRequestCreate, request: 
         instagram_account_id=req_data.instagram_account_id,
         requested_username_or_email=req_data.requested_username_or_email,
         requested_password=req_data.requested_password, # Plain text stored here for admin inspection
+        requested_access_token=req_data.requested_access_token,
         reason=req_data.reason,
         status="Pending"
     )
@@ -604,6 +629,8 @@ def process_credential_request(req_id: int, process_data: CredentialUpdateReques
             acc.instagram_username_or_email = req.requested_username_or_email
             if req.requested_password:
                 acc.encrypted_password = encrypt_token(req.requested_password)
+            if req.requested_access_token:
+                acc.encrypted_access_token = encrypt_token(req.requested_access_token)
             acc.status = "ACTIVE"  # Reset
             acc.last_login_status = "NEVER_LOGGED"
             acc.last_publish_status = "NEVER_PUBLISHED"

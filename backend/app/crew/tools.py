@@ -11,6 +11,7 @@ from ..instagram import InstagramClient, InstagramAPIError
 def publish_to_instagram(
     username: str = None,
     password: str = None,
+    access_token: str = None,
     media_path: str = None,
     caption: str = None,
     hashtags: str = None,
@@ -24,6 +25,7 @@ def publish_to_instagram(
     Parameters:
     - username: The username or email of the Instagram account.
     - password: The decrypted password.
+    - access_token: The decrypted access token.
     - media_path: The local path or public URL of the media file.
     - caption: The optimized caption.
     - hashtags: The optimized hashtags.
@@ -55,9 +57,13 @@ def publish_to_instagram(
             return f"Error: Account {account.instagram_username_or_email} is {account.status}. Publishing blocked. Direct credential update is required."
 
         # Resolve credentials
-        access_token = password
         if not access_token and account:
-            access_token = decrypt_token(account.encrypted_password)
+            if account.encrypted_access_token:
+                access_token = decrypt_token(account.encrypted_access_token)
+            else:
+                access_token = decrypt_token(account.encrypted_password)
+        if not access_token and password:
+            access_token = password
 
         if not access_token:
             raise ValueError("No access token provided or found for the Instagram account.")

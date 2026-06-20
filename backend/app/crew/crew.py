@@ -76,7 +76,7 @@ class InstagramPublishingCrew:
         # In publish_content_task, the agent must invoke the InstagramPublishTool.
         # We clarify how the tool should be invoked by appending instructions.
         publish_task_config = self.tasks_config["publish_content_task"].copy()
-        publish_task_config["description"] += f"\n\nCRITICAL INSTRUCTIONS: You MUST invoke the 'InstagramPublishTool' for each account. Use the following arguments for EACH call:\n- username: the account username\n- password: the decrypted access token / credentials\n- post_id: {post_id}\n- account_id: the numerical account ID\n- caption: the optimized caption from the Content Optimizer\n- media_path: the media_path input variable\n- is_video: {is_video}"
+        publish_task_config["description"] += f"\n\nCRITICAL INSTRUCTIONS: You MUST invoke the 'InstagramPublishTool' for each account. Use the following arguments for EACH call:\n- username: the account username\n- password: the decrypted password\n- access_token: the decrypted access token\n- post_id: {post_id}\n- account_id: the numerical account ID\n- caption: the optimized caption from the Content Optimizer\n- media_path: the media_path input variable\n- is_video: {is_video}"
         
         task_3 = Task(
             config=publish_task_config,

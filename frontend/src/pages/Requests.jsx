@@ -134,6 +134,13 @@ export default function Requests() {
                   {selectedRequest.requested_password || "No change requested"}
                 </span>
               </div>
+
+              <div>
+                <span style={{ color: 'var(--text-muted)' }}>Requested Access Token:</span>
+                <span style={{ display: 'block', wordBreak: 'break-all', fontSize: '0.8125rem', color: 'var(--accent-pink)', background: 'rgba(0,0,0,0.3)', padding: '0.5rem', borderRadius: '6px', marginTop: '0.25rem', fontWeight: 600 }}>
+                  {selectedRequest.requested_access_token || "No change requested"}
+                </span>
+              </div>
             </div>
 
             <div className="form-group" style={{ marginBottom: 0 }}>

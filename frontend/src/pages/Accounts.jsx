@@ -20,11 +20,13 @@ export default function Accounts() {
   // Add Account form states
   const [usernameOrEmail, setUsernameOrEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [accessToken, setAccessToken] = useState('')
 
   // Credential Update Request form states
   const [selectedAccountId, setSelectedAccountId] = useState(null)
   const [reqUsernameOrEmail, setReqUsernameOrEmail] = useState('')
   const [reqPassword, setReqPassword] = useState('')
+  const [reqAccessToken, setReqAccessToken] = useState('')
   const [reqReason, setReqReason] = useState('')
 
   // Edit Account state (Super Admin only)
@@ -60,8 +62,8 @@ export default function Accounts() {
     setError('')
     setSuccess('')
 
-    if (!usernameOrEmail.trim() || !password.trim()) {
-      setError('Username/Email and Password are required.')
+    if (!usernameOrEmail.trim() || !password.trim() || !accessToken.trim()) {
+      setError('Username/Email, Password and Access Token are required.')
       return
     }
 
@@ -74,7 +76,8 @@ export default function Accounts() {
         },
         body: JSON.stringify({
           instagram_username_or_email: usernameOrEmail.trim(),
-          password: password.trim()
+          password: password.trim(),
+          access_token: accessToken.trim()
         })
       })
 
@@ -87,6 +90,7 @@ export default function Accounts() {
       setIsAddFormOpen(false)
       setUsernameOrEmail('')
       setPassword('')
+      setAccessToken('')
       fetchAccounts()
     } catch (err) {
       setError(err.message)
@@ -99,8 +103,8 @@ export default function Accounts() {
     setError('')
     setSuccess('')
 
-    if (!usernameOrEmail.trim() || !password.trim()) {
-      setError('Username/Email and Password are required.')
+    if (!usernameOrEmail.trim() || !password.trim() || !accessToken.trim()) {
+      setError('Username/Email, Password and Access Token are required.')
       return
     }
 
@@ -113,7 +117,8 @@ export default function Accounts() {
         },
         body: JSON.stringify({
           instagram_username_or_email: usernameOrEmail.trim(),
-          password: password.trim()
+          password: password.trim(),
+          access_token: accessToken.trim()
         })
       })
 
@@ -126,6 +131,7 @@ export default function Accounts() {
       setEditingAccount(null)
       setUsernameOrEmail('')
       setPassword('')
+      setAccessToken('')
       fetchAccounts()
     } catch (err) {
       setError(err.message)
@@ -163,6 +169,7 @@ export default function Accounts() {
     setSelectedAccountId(acc.id)
     setReqUsernameOrEmail(acc.instagram_username_or_email)
     setReqPassword('')
+    setReqAccessToken('')
     setReqReason('')
     setIsRequestFormOpen(true)
   }
@@ -173,8 +180,8 @@ export default function Accounts() {
     setError('')
     setSuccess('')
 
-    if (!reqUsernameOrEmail.trim() || !reqPassword.trim() || !reqReason.trim()) {
-      setError('All fields are required to request a credential update.')
+    if (!reqUsernameOrEmail.trim() || !reqPassword.trim() || !reqAccessToken.trim() || !reqReason.trim()) {
+      setError('All fields (including Access Token) are required to request a credential update.')
       return
     }
 
@@ -189,6 +196,7 @@ export default function Accounts() {
           instagram_account_id: selectedAccountId,
           requested_username_or_email: reqUsernameOrEmail.trim(),
           requested_password: reqPassword.trim(),
+          requested_access_token: reqAccessToken.trim(),
           reason: reqReason.trim()
         })
       })
@@ -203,6 +211,7 @@ export default function Accounts() {
       setSelectedAccountId(null)
       setReqUsernameOrEmail('')
       setReqPassword('')
+      setReqAccessToken('')
       setReqReason('')
     } catch (err) {
       setError(err.message)
@@ -213,6 +222,7 @@ export default function Accounts() {
     setEditingAccount(acc)
     setUsernameOrEmail(acc.instagram_username_or_email)
     setPassword('')
+    setAccessToken('')
     setIsAddFormOpen(false)
   }
 
@@ -284,6 +294,19 @@ export default function Accounts() {
               />
             </div>
 
+            <div className="form-group" style={{ marginBottom: 0, gridColumn: 'span 2' }}>
+              <label className="form-label" htmlFor="acc-token">Instagram Access Token</label>
+              <input
+                id="acc-token"
+                type="password"
+                required
+                className="form-input"
+                placeholder="Graph API Access Token (will be encrypted)"
+                value={accessToken}
+                onChange={(e) => setAccessToken(e.target.value)}
+              />
+            </div>
+
             <div style={{ gridColumn: 'span 2', display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
               <button type="button" onClick={() => setIsAddFormOpen(false)} className="btn btn-secondary">Cancel</button>
               <button type="submit" className="btn btn-primary">Connect Credentials</button>
@@ -322,6 +345,19 @@ export default function Accounts() {
               />
             </div>
 
+            <div className="form-group" style={{ marginBottom: 0, gridColumn: 'span 2' }}>
+              <label className="form-label" htmlFor="edit-token">New Instagram Access Token</label>
+              <input
+                id="edit-token"
+                type="password"
+                required
+                className="form-input"
+                placeholder="Enter new access token"
+                value={accessToken}
+                onChange={(e) => setAccessToken(e.target.value)}
+              />
+            </div>
+
             <div style={{ gridColumn: 'span 2', display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
               <button type="button" onClick={() => setEditingAccount(null)} className="btn btn-secondary">Cancel</button>
               <button type="submit" className="btn btn-primary">Save Credentials</button>
@@ -357,6 +393,19 @@ export default function Accounts() {
                 placeholder="Enter new password"
                 value={reqPassword}
                 onChange={(e) => setReqPassword(e.target.value)}
+              />
+            </div>
+
+            <div className="form-group" style={{ marginBottom: 0, gridColumn: 'span 2' }}>
+              <label className="form-label" htmlFor="req-token">New Instagram Access Token</label>
+              <input
+                id="req-token"
+                type="password"
+                required
+                className="form-input"
+                placeholder="Enter new access token"
+                value={reqAccessToken}
+                onChange={(e) => setReqAccessToken(e.target.value)}
               />
             </div>
 
@@ -425,7 +474,7 @@ export default function Accounts() {
                   <td>
                     <span style={{ color: 'var(--success)', fontSize: '0.8125rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                       <span style={{ width: '6px', height: '6px', background: 'var(--success)', borderRadius: '50%' }}></span>
-                      Encrypted Password
+                      Encrypted Credentials
                     </span>
                   </td>
                   <td style={{ textAlign: 'right' }}>

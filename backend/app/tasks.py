@@ -70,10 +70,12 @@ def publish_post_task(self, post_id: int):
 
         from .security import decrypt_token
         decrypted_password = decrypt_token(account.encrypted_password)
+        decrypted_access_token = decrypt_token(account.encrypted_access_token) if account.encrypted_access_token else decrypted_password
         accounts_info = [{
             "id": account.id,
             "username": account.instagram_username_or_email,
-            "credentials": decrypted_password
+            "credentials": decrypted_password,
+            "access_token": decrypted_access_token
         }]
 
         # 3. Detect if media is a video (based on file extension)
@@ -108,6 +110,7 @@ def publish_post_task(self, post_id: int):
             from .crew.tools import publish_to_instagram
             from .security import decrypt_token
             decrypted_password = decrypt_token(account.encrypted_password)
+            decrypted_access_token = decrypt_token(account.encrypted_access_token) if account.encrypted_access_token else decrypted_password
 
             # Add logging
             print(type(publish_to_instagram))
@@ -117,6 +120,7 @@ def publish_post_task(self, post_id: int):
             tool_args = {
                 "username": account.instagram_username_or_email,
                 "password": decrypted_password,
+                "access_token": decrypted_access_token,
                 "media_path": post.media_path,
                 "caption": f"{post.caption or ''}",
                 "hashtags": f"{post.hashtags or ''} #instagram #viral #ai",

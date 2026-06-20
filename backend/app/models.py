@@ -34,6 +34,7 @@ class InstagramAccount(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     instagram_username_or_email = Column(String, nullable=False)
     encrypted_password = Column(Text, nullable=False)
+    encrypted_access_token = Column(Text, nullable=True)
     status = Column(String, default="ACTIVE", nullable=False)  # "ACTIVE", "INACTIVE", "LOCKED"
     last_login_status = Column(String, default="NEVER_LOGGED", nullable=False)  # "SUCCESS", "FAILED"
     last_publish_status = Column(String, default="NEVER_PUBLISHED", nullable=False)  # "SUCCESS", "FAILED"
@@ -53,6 +54,7 @@ class CredentialUpdateRequest(Base):
     instagram_account_id = Column(Integer, ForeignKey("instagram_accounts.id", ondelete="SET NULL"), nullable=True)
     requested_username_or_email = Column(String, nullable=False)
     requested_password = Column(String, nullable=True) # Plain text, encrypted upon approval before saving
+    requested_access_token = Column(Text, nullable=True)
     reason = Column(Text, nullable=False)
     status = Column(String, default="Pending", nullable=False)  # "Pending", "Approved", "Rejected"
     admin_comments = Column(Text, nullable=True)

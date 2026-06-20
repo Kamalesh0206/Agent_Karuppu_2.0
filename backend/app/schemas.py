@@ -56,6 +56,7 @@ class TokenData(BaseModel):
 class InstagramAccountCreate(BaseModel):
     instagram_username_or_email: str
     password: str
+    access_token: str
 
 class InstagramAccountResponse(BaseModel):
     id: int
@@ -75,6 +76,7 @@ class CredentialUpdateRequestCreate(BaseModel):
     instagram_account_id: Optional[int] = None
     requested_username_or_email: str
     requested_password: Optional[str] = None
+    requested_access_token: Optional[str] = None
     reason: str
 
 class CredentialUpdateRequestProcess(BaseModel):
@@ -87,6 +89,7 @@ class CredentialUpdateRequestResponse(BaseModel):
     instagram_account_id: Optional[int] = None
     requested_username_or_email: str
     requested_password: Optional[str] = None
+    requested_access_token: Optional[str] = None
     status: str
     reason: str
     admin_comments: Optional[str] = None
