@@ -129,39 +129,20 @@ def publish_post_task(self, post_id: int):
                 "is_video": is_video
             }
 
-            # Try the correct CrewAI tool execution method dynamically
+            # Execute the CrewAI tool using the best execution method
             tool_result = None
-            try:
-                # 1. Direct call
-                tool_result = publish_to_instagram(**tool_args)
-            except (InstagramAPIError, ValueError) as e:
-                raise e
-            except Exception as e1:
+            if hasattr(publish_to_instagram, "func"):
+                tool_result = publish_to_instagram.func(**tool_args)
+            elif hasattr(publish_to_instagram, "_run"):
+                tool_result = publish_to_instagram._run(**tool_args)
+            else:
                 try:
-                    # 2. run()
-                    tool_result = publish_to_instagram.run(**tool_args)
-                except (InstagramAPIError, ValueError) as e:
-                    raise e
-                except Exception as e2:
+                    tool_result = publish_to_instagram(**tool_args)
+                except TypeError:
                     try:
-                        # 3. invoke()
+                        tool_result = publish_to_instagram.run(**tool_args)
+                    except TypeError:
                         tool_result = publish_to_instagram.invoke(tool_args)
-                    except (InstagramAPIError, ValueError) as e:
-                        raise e
-                    except Exception as e3:
-                        # Fallback: check internal callables
-                        if hasattr(publish_to_instagram, "func"):
-                            try:
-                                tool_result = publish_to_instagram.func(**tool_args)
-                            except (InstagramAPIError, ValueError) as e:
-                                raise e
-                        elif hasattr(publish_to_instagram, "_run"):
-                            try:
-                                tool_result = publish_to_instagram._run(**tool_args)
-                            except (InstagramAPIError, ValueError) as e:
-                                raise e
-                        else:
-                            raise RuntimeError(f"Could not execute CrewAI tool. Direct: {e1}, Run: {e2}, Invoke: {e3}")
 
             # Monitoring Agent Simulation
             report = f"Mock Agent Simulation Completed. Details:\n{tool_result}"
