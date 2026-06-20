@@ -78,14 +78,16 @@ class InstagramClient:
         """Determines if the token is a mock/development token."""
         if not token:
             return True
+        token = token.strip()
         if token.startswith("mock_") or token == "development_token":
             return True
-        # All Facebook Graph API access tokens start with 'EAA'. If it doesn't,
-        # treat it as a mock token to allow seamless local testing with dummy inputs.
-        if not token.startswith("EAA"):
-            logger.info("Token does not start with 'EAA' (Facebook prefix). Treating as mock token.")
-            return True
-        return False
+        # All Facebook/Instagram API access tokens start with 'EAA' or 'IG'. If it starts with either,
+        # it is a real token, so return False (it is not a mock token).
+        if token.startswith("EAA") or token.startswith("IG"):
+            return False
+        # Otherwise, treat it as a mock token to allow seamless local testing with dummy inputs.
+        logger.info("Token does not start with 'EAA' or 'IG'. Treating as mock token.")
+        return True
 
     @classmethod
     def verify_token_permissions(cls, access_token: str):
