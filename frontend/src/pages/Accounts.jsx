@@ -21,12 +21,14 @@ export default function Accounts() {
   const [usernameOrEmail, setUsernameOrEmail] = useState('')
   const [password, setPassword] = useState('')
   const [accessToken, setAccessToken] = useState('')
+  const [facebookPageId, setFacebookPageId] = useState('')
 
   // Credential Update Request form states
   const [selectedAccountId, setSelectedAccountId] = useState(null)
   const [reqUsernameOrEmail, setReqUsernameOrEmail] = useState('')
   const [reqPassword, setReqPassword] = useState('')
   const [reqAccessToken, setReqAccessToken] = useState('')
+  const [reqFacebookPageId, setReqFacebookPageId] = useState('')
   const [reqReason, setReqReason] = useState('')
 
   // Edit Account state (Super Admin only)
@@ -82,7 +84,8 @@ export default function Accounts() {
         body: JSON.stringify({
           instagram_username_or_email: usernameOrEmail.trim(),
           password: password.trim(),
-          access_token: accessToken.trim()
+          access_token: accessToken.trim(),
+          facebook_page_id: facebookPageId.trim() || null
         })
       })
 
@@ -96,6 +99,7 @@ export default function Accounts() {
       setUsernameOrEmail('')
       setPassword('')
       setAccessToken('')
+      setFacebookPageId('')
       fetchAccounts()
     } catch (err) {
       setError(err.message)
@@ -123,7 +127,8 @@ export default function Accounts() {
         body: JSON.stringify({
           instagram_username_or_email: usernameOrEmail.trim(),
           password: password.trim(),
-          access_token: accessToken.trim()
+          access_token: accessToken.trim(),
+          facebook_page_id: facebookPageId.trim() || null
         })
       })
 
@@ -137,6 +142,7 @@ export default function Accounts() {
       setUsernameOrEmail('')
       setPassword('')
       setAccessToken('')
+      setFacebookPageId('')
       fetchAccounts()
     } catch (err) {
       setError(err.message)
