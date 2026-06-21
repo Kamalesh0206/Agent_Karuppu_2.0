@@ -322,6 +322,18 @@ export default function Accounts() {
               />
             </div>
 
+            <div className="form-group" style={{ marginBottom: 0, gridColumn: 'span 2' }}>
+              <label className="form-label" htmlFor="acc-page-id">Facebook Page ID (Optional)</label>
+              <input
+                id="acc-page-id"
+                type="text"
+                className="form-input"
+                placeholder="Facebook Page ID (if you manage multiple pages)"
+                value={facebookPageId}
+                onChange={(e) => setFacebookPageId(e.target.value)}
+              />
+            </div>
+
             <div style={{ gridColumn: 'span 2', display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
               <button type="button" onClick={() => setIsAddFormOpen(false)} className="btn btn-secondary">Cancel</button>
               <button type="submit" className="btn btn-primary">Connect Credentials</button>
@@ -373,6 +385,18 @@ export default function Accounts() {
               />
             </div>
 
+            <div className="form-group" style={{ marginBottom: 0, gridColumn: 'span 2' }}>
+              <label className="form-label" htmlFor="edit-page-id">New Facebook Page ID (Optional)</label>
+              <input
+                id="edit-page-id"
+                type="text"
+                className="form-input"
+                placeholder="Update Facebook Page ID"
+                value={facebookPageId}
+                onChange={(e) => setFacebookPageId(e.target.value)}
+              />
+            </div>
+
             <div style={{ gridColumn: 'span 2', display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
               <button type="button" onClick={() => setEditingAccount(null)} className="btn btn-secondary">Cancel</button>
               <button type="submit" className="btn btn-primary">Save Credentials</button>
@@ -421,6 +445,18 @@ export default function Accounts() {
                 placeholder="Enter new access token"
                 value={reqAccessToken}
                 onChange={(e) => setReqAccessToken(e.target.value)}
+              />
+            </div>
+
+            <div className="form-group" style={{ marginBottom: 0, gridColumn: 'span 2' }}>
+              <label className="form-label" htmlFor="req-page-id">New Facebook Page ID (Optional)</label>
+              <input
+                id="req-page-id"
+                type="text"
+                className="form-input"
+                placeholder="Request Facebook Page ID update"
+                value={reqFacebookPageId}
+                onChange={(e) => setReqFacebookPageId(e.target.value)}
               />
             </div>
 
