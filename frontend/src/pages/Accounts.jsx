@@ -181,6 +181,7 @@ export default function Accounts() {
     setReqUsernameOrEmail(acc.instagram_username_or_email)
     setReqPassword('')
     setReqAccessToken('')
+    setReqFacebookPageId(acc.facebook_page_id || '')
     setReqReason('')
     setIsRequestFormOpen(true)
   }
@@ -208,6 +209,7 @@ export default function Accounts() {
           requested_username_or_email: reqUsernameOrEmail.trim(),
           requested_password: reqPassword.trim(),
           requested_access_token: reqAccessToken.trim(),
+          facebook_page_id: reqFacebookPageId.trim() || null,
           reason: reqReason.trim()
         })
       })
@@ -223,6 +225,7 @@ export default function Accounts() {
       setReqUsernameOrEmail('')
       setReqPassword('')
       setReqAccessToken('')
+      setReqFacebookPageId('')
       setReqReason('')
     } catch (err) {
       setError(err.message)
@@ -234,6 +237,7 @@ export default function Accounts() {
     setUsernameOrEmail(acc.instagram_username_or_email)
     setPassword('')
     setAccessToken('')
+    setFacebookPageId(acc.facebook_page_id || '')
     setIsAddFormOpen(false)
   }
 
