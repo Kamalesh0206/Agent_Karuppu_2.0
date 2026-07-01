@@ -1,56 +1,40 @@
+import datetime
+import redis
+import json
+from .models import PublishingLog
+from .config import settings
+
 def get_simplified_failure_reason(error: Exception) -> str:
     """
-    Maps various exceptions or error string messages into clean, 
-    user-friendly failure reasons, preventing leaking stack trace info 
-    directly to standard users.
+    Maps exceptions or error string messages into clean, user-friendly failure reasons.
     """
     err_str = str(error).lower()
-    
-    # Common simulated failure keywords
-    if "invalid username or password" in err_str or "incorrect password" in err_str:
-        return "Instagram login failed. Invalid username or password."
-    if "two-factor" in err_str or "2fa" in err_str:
-        return "Two-Factor Authentication is enabled on this Instagram account."
-    if "checkpoint" in err_str or "security challenge" in err_str:
-        return "Instagram security challenge detected. Email verification required."
-    if "locked" in err_str:
-        return "Account temporarily locked."
-    if "session expired" in err_str:
-        return "Session expired."
-    if "timeout" in err_str:
-        return "Upload timeout."
-    if "format" in err_str or "unsupported" in err_str:
-        return "Unsupported media format."
-    if "connection" in err_str or "network" in err_str:
-        return "Network connection failure."
+    if "permissions" in err_str:
+        return "Facebook Page permissions check failed."
+    if "oauth" in err_str or "access token" in err_str:
+        return "Facebook OAuth session expired or invalid."
+    if "expired" in err_str:
+        return "Facebook token has expired."
+    if "unsupported" in err_str:
+        return "Unsupported media format (must be JPG, PNG, MP4, or MOV)."
+    if "network" in err_str or "timeout" in err_str:
+        return "Network timeout contacting Meta APIs."
     if "rate limit" in err_str:
-        return "Instagram rate limit reached."
-    if "service unavailable" in err_str:
-        return "Instagram service unavailable."
-    if "automation error" in err_str:
-        return "Browser automation error."
-    if "element not found" in err_str:
-        return "Element not found during login."
-        
+        return "Meta API rate limit reached."
     return "Unknown publishing error"
-
 
 def update_post_progress(db, post_id: int, status: str, percent: int, failure_reason: str = None):
     """
     Updates the database record and publishes a real-time event via Redis Pub/Sub.
     """
-    import redis
-    import json
-    import datetime
-    from .models import Post
-    from .config import settings
-
-    post = db.query(Post).filter(Post.id == post_id).first()
+    post = db.query(PublishingLog).filter(PublishingLog.id == post_id).first()
     if post:
-        post.publish_status = status
-        post.progress_percent = percent
+        post.status = status
+        # Note: percent isn't stored in our new schema since the schema specifies:
+        # id, account_id, media_type, caption, hashtags, status, error_message, post_id, published_at
+        # But we update progress in memory or via Redis progress stream, and we update status & error_message in DB.
         if failure_reason is not None:
-            post.failure_reason = failure_reason
+            post.error_message = failure_reason
         post.updated_at = datetime.datetime.utcnow()
         db.commit()
         db.refresh(post)
@@ -60,15 +44,13 @@ def update_post_progress(db, post_id: int, status: str, percent: int, failure_re
             r = redis.Redis.from_url(settings.REDIS_URL)
             payload = {
                 "post_id": post.id,
-                "job_id": post.job_id,
-                "instagram_account_id": post.instagram_account_id,
+                "account_id": post.account_id,
                 "status": status,
                 "progress_percent": percent,
-                "failure_reason": post.failure_reason,
+                "failure_reason": post.error_message,
                 "updated_at": post.updated_at.isoformat()
             }
             r.publish("instagram_publish_progress", json.dumps(payload))
             r.close()
         except Exception as e:
             print(f"[Redis Warning] Failed to publish progress update: {e}")
-
