@@ -225,6 +225,24 @@ class InstagramClient:
             
             pages_data = response.json().get("data", [])
             if not pages_data:
+                # Fallback: check if the token is a Page Access Token
+                me_url = f"{cls.BASE_URL}/me"
+                me_params = {
+                    "fields": "id,instagram_business_account",
+                    "access_token": access_token
+                }
+                cls._log_request("GET", me_url, params=me_params)
+                me_response = session.get(me_url, params=me_params, timeout=15)
+                cls._log_request("GET", me_url, params=me_params, response=me_response)
+                
+                if me_response.status_code == 200:
+                    me_data = me_response.json()
+                    ig_account = me_data.get("instagram_business_account")
+                    if ig_account:
+                        ig_id = ig_account.get("id")
+                        logger.info(f"Successfully retrieved Instagram Business Account ID via Page Access Token fallback: {ig_id}")
+                        return ig_id
+                
                 raise InstagramAPIError("No Facebook Pages linked to this access token. An Instagram Business Account must be connected to a FB Page.")
  
             # Step 2: Query each Page to find the linked Instagram Business Account
@@ -551,10 +569,35 @@ class InstagramClient:
                         break
                         
             if not ig_business_id:
-                return {
-                    "status": "rejected",
-                    "reason": "Instagram account is not linked to a Facebook Page"
+                # Fallback: check if the token is a Page Access Token
+                me_url = f"{cls.BASE_URL}/me"
+                me_params = {
+                    "fields": "id,instagram_business_account",
+                    "access_token": access_token
                 }
+                cls._log_request("GET", me_url, params=me_params)
+                me_response = session.get(me_url, params=me_params, timeout=15)
+                cls._log_request("GET", me_url, params=me_params, response=me_response)
+                
+                if me_response.status_code == 200:
+                    me_data = me_response.json()
+                    ig_account = me_data.get("instagram_business_account")
+                    if ig_account:
+                        ig_business_id = ig_account.get("id")
+                        resolved_page_id = me_data.get("id")
+                        
+                        # Verify against user-supplied page ID if provided
+                        if facebook_page_id and resolved_page_id != facebook_page_id:
+                            return {
+                                "status": "rejected",
+                                "reason": f"Facebook Page ID {facebook_page_id} does not match the page for this token ({resolved_page_id})"
+                            }
+                
+                if not ig_business_id:
+                    return {
+                        "status": "rejected",
+                        "reason": "Instagram account is not linked to a Facebook Page"
+                    }
                 
             # 3. Verify Instagram account existence and eligibility
             url = f"{cls.BASE_URL}/{ig_business_id}"
