@@ -1,5 +1,6 @@
 import os
 from pydantic_settings import BaseSettings
+from typing import Optional
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Agent Karuppu"
@@ -25,14 +26,23 @@ class Settings(BaseSettings):
     OPENAI_MODEL_NAME: str = "gpt-4o-mini"
     
     # Instagram Static Server Configuration
-    # Instagram Graph API needs public URLs to fetch files.
-    # In a local development setup, this prefix allows the application to serve uploaded files.
-    # When deployed, it should point to a public server address (e.g., ngrok or production domain).
     PUBLIC_URL_PREFIX: str = "http://localhost:8000/static/uploads"
     
     # Default Admin Credentials
     ADMIN_USERNAME: str = "admin"
     ADMIN_PASSWORD: str = "admin123"  # Will be hashed on startup
+    
+    # Meta / Facebook Login OAuth Settings
+    FACEBOOK_CLIENT_ID: str = ""
+    FACEBOOK_CLIENT_SECRET: str = ""
+    FACEBOOK_REDIRECT_URI: str = "http://localhost:3000/auth/facebook/callback"
+
+    # AWS S3 Storage Settings
+    AWS_ACCESS_KEY_ID: str = ""
+    AWS_SECRET_ACCESS_KEY: str = ""
+    AWS_STORAGE_BUCKET_NAME: str = ""
+    AWS_S3_ENDPOINT_URL: Optional[str] = ""
+    AWS_S3_REGION_NAME: Optional[str] = "us-east-1"
 
     class Config:
         env_file = ".env"

@@ -14,8 +14,8 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     role = Column(String, default="User", nullable=False)  # "Super Admin", "User"
     status = Column(String, default="Pending Approval", nullable=False)  # "Pending Approval", "Approved", "Rejected", "Deactivated"
-    email_verified = Column(Boolean, default=True, nullable=False)  # Defaults to True as OTP is removed
-    mobile_verified = Column(Boolean, default=True, nullable=False) # Defaults to True as OTP is removed
+    email_verified = Column(Boolean, default=True, nullable=False)
+    mobile_verified = Column(Boolean, default=True, nullable=False)
     publishing_permission = Column(Boolean, default=True, nullable=False)
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
@@ -23,8 +23,7 @@ class User(Base):
 
     # Relationships
     accounts = relationship("InstagramAccount", back_populates="user", cascade="all, delete-orphan")
-    requests = relationship("CredentialUpdateRequest", back_populates="user", cascade="all, delete-orphan")
-    posts = relationship("Post", back_populates="user", cascade="all, delete-orphan")
+    posts = relationship("PublishingLog", back_populates="user", cascade="all, delete-orphan")
     logs = relationship("Log", back_populates="user")
 
 class InstagramAccount(Base):
@@ -32,62 +31,44 @@ class InstagramAccount(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    instagram_username_or_email = Column(String, nullable=False)
-    encrypted_password = Column(Text, nullable=False)
-    encrypted_access_token = Column(Text, nullable=True)
-    instagram_account_id = Column(String, unique=True, nullable=True)
+    
+    # Meta OAuth specific fields
+    facebook_user_id = Column(String, nullable=True)
     facebook_page_id = Column(String, nullable=True)
-    token_expiry_time = Column(DateTime, nullable=True)
+    facebook_page_name = Column(String, nullable=True)
+    page_access_token = Column(Text, nullable=False)  # Encrypted
+    instagram_business_id = Column(String, unique=True, nullable=True)
+    instagram_username = Column(String, nullable=True)
+    token_expiry = Column(DateTime, nullable=True)
     status = Column(String, default="ACTIVE", nullable=False)  # "ACTIVE", "INACTIVE", "LOCKED"
-    last_login_status = Column(String, default="NEVER_LOGGED", nullable=False)  # "SUCCESS", "FAILED"
-    last_publish_status = Column(String, default="NEVER_PUBLISHED", nullable=False)  # "SUCCESS", "FAILED"
+    
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
     # Relationships
     user = relationship("User", back_populates="accounts")
-    posts = relationship("Post", back_populates="instagram_account", cascade="all, delete-orphan")
-    requests = relationship("CredentialUpdateRequest", back_populates="instagram_account", cascade="all, delete-orphan")
+    logs = relationship("PublishingLog", back_populates="account", cascade="all, delete-orphan")
 
-class CredentialUpdateRequest(Base):
-    __tablename__ = "credential_update_requests"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    instagram_account_id = Column(Integer, ForeignKey("instagram_accounts.id", ondelete="SET NULL"), nullable=True)
-    requested_username_or_email = Column(String, nullable=False)
-    requested_password = Column(String, nullable=True) # Plain text, encrypted upon approval before saving
-    requested_access_token = Column(Text, nullable=True)
-    facebook_page_id = Column(String, nullable=True)
-    reason = Column(Text, nullable=False)
-    status = Column(String, default="Pending", nullable=False)  # "Pending", "Approved", "Rejected"
-    admin_comments = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
-
-    # Relationships
-    user = relationship("User", back_populates="requests")
-    instagram_account = relationship("InstagramAccount", back_populates="requests")
-
-class Post(Base):
-    __tablename__ = "posts"
+class PublishingLog(Base):
+    __tablename__ = "publishing_logs"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    instagram_account_id = Column(Integer, ForeignKey("instagram_accounts.id", ondelete="CASCADE"), nullable=False)
-    media_path = Column(String, nullable=False)
+    account_id = Column(Integer, ForeignKey("instagram_accounts.id", ondelete="CASCADE"), nullable=False)
+    media_type = Column(String, nullable=False)  # "IMAGE", "VIDEO"
     caption = Column(Text, nullable=True)
     hashtags = Column(Text, nullable=True)
-    publish_status = Column(String, default="Pending", nullable=False)  # "Pending", "Success", "Failed"
-    failure_reason = Column(Text, nullable=True)
-    job_id = Column(String, nullable=True)
-    progress_percent = Column(Integer, default=0, nullable=False)
+    status = Column(String, default="Pending", nullable=False)  # "Pending", "Success", "Failed"
+    error_message = Column(Text, nullable=True)
+    post_id = Column(String, nullable=True)  # Instagram Media ID
+    published_at = Column(DateTime, default=datetime.datetime.utcnow)
+    
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
     # Relationships
     user = relationship("User", back_populates="posts")
-    instagram_account = relationship("InstagramAccount", back_populates="posts")
+    account = relationship("InstagramAccount", back_populates="logs")
 
 class Log(Base):
     __tablename__ = "logs"

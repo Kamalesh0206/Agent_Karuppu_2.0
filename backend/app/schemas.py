@@ -1,6 +1,6 @@
 import datetime
 from typing import List, Optional
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
 # User Schemas
 class UserLogin(BaseModel):
@@ -53,79 +53,41 @@ class TokenData(BaseModel):
     role: Optional[str] = None
 
 # Instagram Account Schemas
-class InstagramAccountCreate(BaseModel):
-    instagram_username_or_email: str
-    password: str
-    access_token: str
-    facebook_page_id: Optional[str] = None
-
 class InstagramAccountResponse(BaseModel):
     id: int
     user_id: int
-    instagram_username_or_email: str
-    status: str
-    last_login_status: str
-    last_publish_status: str
-    decrypted_password: Optional[str] = None
-    decrypted_access_token: Optional[str] = None
-    instagram_account_id: Optional[str] = None
+    facebook_user_id: Optional[str] = None
     facebook_page_id: Optional[str] = None
-    token_expiry_time: Optional[datetime.datetime] = None
+    facebook_page_name: Optional[str] = None
+    instagram_business_id: Optional[str] = None
+    instagram_username: Optional[str] = None
+    token_expiry: Optional[datetime.datetime] = None
+    status: str
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
     class Config:
         from_attributes = True
 
-# Instagram Credential Update Request Schemas
-class CredentialUpdateRequestCreate(BaseModel):
-    instagram_account_id: Optional[int] = None
-    requested_username_or_email: str
-    requested_password: Optional[str] = None
-    requested_access_token: Optional[str] = None
-    facebook_page_id: Optional[str] = None
-    reason: str
-
-class CredentialUpdateRequestProcess(BaseModel):
-    status: str  # "Approved", "Rejected"
-    admin_comments: Optional[str] = None
-
-class CredentialUpdateRequestResponse(BaseModel):
-    id: int
-    user_id: int
-    instagram_account_id: Optional[int] = None
-    requested_username_or_email: str
-    requested_password: Optional[str] = None
-    requested_access_token: Optional[str] = None
-    facebook_page_id: Optional[str] = None
-    status: str
-    reason: str
-    admin_comments: Optional[str] = None
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-
-    class Config:
-        from_attributes = True
-
-# Post / Publishing Schemas
+# Publishing Schemas
 class PublishRequest(BaseModel):
     caption: Optional[str] = ""
     hashtags: Optional[str] = ""
     account_ids: List[int]
     media_path: str
 
-class PostResponse(BaseModel):
+class PublishingLogResponse(BaseModel):
     id: int
     user_id: int
-    instagram_account_id: int
-    instagram_username: Optional[str] = None  # Will display username/email on dashboard history
-    media_path: str
+    account_id: int
+    instagram_username: Optional[str] = None
+    media_type: str
     caption: Optional[str] = None
     hashtags: Optional[str] = None
-    publish_status: str
-    failure_reason: Optional[str] = None
-    job_id: Optional[str] = None
-    progress_percent: int = 0
+    status: str
+    error_message: Optional[str] = None
+    post_id: Optional[str] = None
+    published_at: datetime.datetime
     created_at: datetime.datetime
     updated_at: Optional[datetime.datetime] = None
 
