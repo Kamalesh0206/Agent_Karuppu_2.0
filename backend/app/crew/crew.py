@@ -32,82 +32,79 @@ class InstagramPublishingCrew:
         """
         
         # 1. Instantiate Agents
-        admin_agent = Agent(
-            config=self.agents_config["admin_agent"],
-            llm=self.llm,
-            tools=[audit_log],
-            verbose=True
-        )
-
-        content_agent = Agent(
-            config=self.agents_config["content_agent"],
+        content_optimizer = Agent(
+            config=self.agents_config["content_optimizer"],
             llm=self.llm,
             tools=[],
             verbose=True
         )
 
-        publishing_agent = Agent(
-            config=self.agents_config["publishing_agent"],
+        instagram_publisher = Agent(
+            config=self.agents_config["instagram_publisher"],
             llm=self.llm,
             tools=[publish_to_instagram],
             verbose=True
         )
 
-        monitoring_agent = Agent(
-            config=self.agents_config["monitoring_agent"],
+        operations_auditor = Agent(
+            config=self.agents_config["operations_auditor"],
             llm=self.llm,
             tools=[audit_log],
             verbose=True
         )
 
+        notification_agent = Agent(
+            config=self.agents_config["notification_agent"],
+            llm=self.llm,
+            tools=[],
+            verbose=True
+        )
+
         # 2. Instantiate Tasks
-        # We manually map configurations to tasks and link them.
-        
         task_1 = Task(
             config=self.tasks_config["validate_and_optimize_content_task"],
-            agent=content_agent
+            agent=content_optimizer
         )
 
-        task_2 = Task(
-            config=self.tasks_config["verify_accounts_status_task"],
-            agent=admin_agent
-        )
-
-        # In publish_content_task, the agent must invoke the InstagramPublishTool.
-        # We clarify how the tool should be invoked by appending instructions.
         publish_task_config = self.tasks_config["publish_content_task"].copy()
-        publish_task_config["description"] += f"\n\nCRITICAL INSTRUCTIONS: You MUST invoke the 'InstagramPublishTool' for each account. Use the following arguments for EACH call:\n- username: the account username\n- password: the decrypted password\n- access_token: the decrypted access token\n- post_id: {post_id}\n- account_id: the numerical account ID\n- caption: the optimized caption from the Content Optimizer\n- media_path: the media_path input variable\n- is_video: {is_video}"
+        publish_task_config["description"] += (
+            f"\n\nCRITICAL INSTRUCTIONS: You MUST invoke the 'InstagramPublishTool' for the account. "
+            f"Use the following arguments:\n"
+            f"- username: the account username\n"
+            f"- access_token: the decrypted access token\n"
+            f"- post_id: {post_id}\n"
+            f"- account_id: the numerical account ID\n"
+            f"- caption: the optimized caption\n"
+            f"- media_path: the media_path input variable\n"
+            f"- is_video: {is_video}"
+        )
         
-        task_3 = Task(
+        task_2 = Task(
             config=publish_task_config,
-            agent=publishing_agent
+            agent=instagram_publisher
+        )
+
+        task_3 = Task(
+            config=self.tasks_config["monitor_and_log_task"],
+            agent=operations_auditor
         )
 
         task_4 = Task(
-            config=self.tasks_config["monitor_and_log_task"],
-            agent=monitoring_agent
+            config=self.tasks_config["notify_completion_task"],
+            agent=notification_agent
         )
 
         # 3. Create the Crew
-        # Using sequential process since Content Agent -> Admin Agent -> Publishing Agent -> Monitoring Agent
         return Crew(
-            agents=[admin_agent, content_agent, publishing_agent, monitoring_agent],
+            agents=[content_optimizer, instagram_publisher, operations_auditor, notification_agent],
             tasks=[task_1, task_2, task_3, task_4],
             process=Process.sequential,
             verbose=True
         )
 
-    def kickoff(self, post_id: int, caption: str, hashtags: str, media_path: str, accounts_info: List[Dict[str, Any]], is_video: bool) -> str:
+    def kickoff(self, post_id: int, caption: str, hashtags: str, media_path: str, account_info: Dict[str, Any], is_video: bool) -> str:
         """
         Kicks off the crew workflow.
-        
-        Arguments:
-            post_id: The primary key of the post
-            caption: User-entered raw caption
-            hashtags: User-entered raw hashtags
-            media_path: Local media path
-            accounts_info: A list of dicts like [{"id": 1, "username": "account1"}]
-            is_video: Whether the media file is a video
         """
         crew_instance = self.build_crew(post_id=post_id, is_video=is_video)
         
@@ -116,7 +113,7 @@ class InstagramPublishingCrew:
             "caption": caption,
             "hashtags": hashtags,
             "media_path": media_path,
-            "accounts_info": str(accounts_info)  # Serialize list of dicts for LLM comprehension
+            "account_info": str(account_info)
         }
         
         # Execute crew execution
