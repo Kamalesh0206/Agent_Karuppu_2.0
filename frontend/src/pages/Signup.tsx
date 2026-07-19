@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
-import { API_URL } from '../config.ts';
+import { API_URL, setCustomApiUrl } from '../config.ts';
 import { motion } from 'framer-motion';
 import BrandLogo from '../components/BrandLogo';
 
@@ -15,6 +15,38 @@ export default function Signup() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Mobile & Production API Configuration States
+  const [showApiConfig, setShowApiConfig] = useState(false);
+  const [customUrlInput, setCustomUrlInput] = useState(API_URL);
+  const [healthTesting, setHealthTesting] = useState(false);
+  const [healthResult, setHealthResult] = useState<string | null>(null);
+
+  const handleTestAndSaveApi = async () => {
+    setHealthTesting(true);
+    setHealthResult(null);
+    let target = customUrlInput.trim().replace(/\/$/, '');
+    if (target && !target.startsWith('http://') && !target.startsWith('https://')) {
+      target = `https://${target}`;
+    }
+
+    try {
+      console.log(`[API Config Test] Testing connection to ${target}/health`);
+      const res = await axios.get(`${target}/health`, { timeout: 8000 });
+      if (res.data && (res.data.status === "healthy" || res.data.version)) {
+        setHealthResult("✓ Server connection successful! Status: Healthy. Saving & Reloading...");
+        setTimeout(() => {
+          setCustomApiUrl(target);
+        }, 1200);
+      } else {
+        setHealthResult(`Response received: ${JSON.stringify(res.data)}`);
+      }
+    } catch (e: any) {
+      setHealthResult(`❌ Connection Failed: ${e.message || 'Server Unreachable'}. Check URL or CORS.`);
+    } finally {
+      setHealthTesting(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,6 +94,7 @@ export default function Signup() {
         msg = "Backend database error during registration (500). Please contact administrator.";
       } else if (!err.response) {
         msg = `Network Connection Error (${err.message || 'Server Unreachable'}). Unable to reach backend API at ${API_URL}. Please check internet connection or server CORS settings.`;
+        setShowApiConfig(true);
       }
 
       setError(msg);
@@ -91,10 +124,48 @@ export default function Signup() {
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-semibold"
+            className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-semibold space-y-2"
           >
-            {error}
+            <p>{error}</p>
+            <button
+              type="button"
+              onClick={() => setShowApiConfig(!showApiConfig)}
+              className="text-xs text-purple-400 hover:text-purple-300 underline font-bold cursor-pointer block"
+            >
+              {showApiConfig ? "Hide API Configuration" : "⚙ Configure Backend API Endpoint URL"}
+            </button>
           </motion.div>
+        )}
+
+        {showApiConfig && (
+          <div className="mb-6 p-4 rounded-2xl bg-slate-950/80 border border-purple-500/30 space-y-3 relative">
+            <div className="flex items-center justify-between text-xs font-bold text-slate-300">
+              <span>Backend API Server URL</span>
+              <span className="text-[10px] text-purple-400 font-mono">Current: {API_URL}</span>
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={customUrlInput}
+                onChange={(e) => setCustomUrlInput(e.target.value)}
+                placeholder="e.g. https://your-backend.onrender.com"
+                className="flex-1 px-3 py-2 text-xs rounded-xl bg-slate-900 border border-slate-800 text-slate-200 outline-none focus:border-purple-500 font-mono"
+              />
+              <button
+                type="button"
+                onClick={handleTestAndSaveApi}
+                disabled={healthTesting}
+                className="px-3 py-2 bg-purple-500 hover:bg-purple-400 text-slate-950 text-xs font-bold rounded-xl cursor-pointer disabled:opacity-50 shrink-0"
+              >
+                {healthTesting ? "Testing..." : "Test & Save"}
+              </button>
+            </div>
+            {healthResult && (
+              <p className={`text-[11px] font-mono leading-relaxed ${healthResult.includes("✓") ? "text-green-400" : "text-red-400"}`}>
+                {healthResult}
+              </p>
+            )}
+          </div>
         )}
 
         {success && (
@@ -170,14 +241,14 @@ export default function Signup() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3.5 rounded-xl font-bold text-slate-950 gradient-btn shadow-lg shadow-purple-500/20 hover:shadow-purple-500/30 flex items-center justify-center cursor-pointer transition-all duration-300 disabled:opacity-50"
+              className="w-full py-4 rounded-xl font-bold text-slate-950 gradient-btn shadow-lg shadow-purple-500/20 hover:shadow-purple-500/30 flex items-center justify-center cursor-pointer transition-all duration-300 disabled:opacity-50 mt-2"
             >
               {loading ? (
                 <svg className="animate-spin h-5 w-5 text-slate-950" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
-              ) : "Register"}
+              ) : "Create Account"}
             </button>
           </form>
         )}
