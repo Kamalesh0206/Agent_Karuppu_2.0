@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
-import { API_URL, setCustomApiUrl } from '../config.ts';
+import { API_URL, setCustomApiUrl, isFrontendUrl, validateBackendHealth } from '../config.ts';
 import { motion } from 'framer-motion';
 import BrandLogo from '../components/BrandLogo';
 
@@ -13,8 +13,8 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
 
   // Mobile & Production API Configuration States
-  const [showApiConfig, setShowApiConfig] = useState(false);
-  const [customUrlInput, setCustomUrlInput] = useState(API_URL);
+  const [showApiConfig, setShowApiConfig] = useState(isFrontendUrl(API_URL));
+  const [customUrlInput, setCustomUrlInput] = useState(isFrontendUrl(API_URL) ? '' : API_URL);
   const [healthTesting, setHealthTesting] = useState(false);
   const [healthResult, setHealthResult] = useState<string | null>(null);
 
@@ -26,28 +26,28 @@ export default function Login() {
       target = `https://${target}`;
     }
 
-    try {
-      console.log(`[API Config Test] Testing connection to ${target}/health`);
-      const res = await axios.get(`${target}/health`, { timeout: 8000 });
-      if (res.data && (res.data.status === "healthy" || res.data.version)) {
-        setHealthResult("✓ Server connection successful! Status: Healthy. Saving & Reloading...");
-        setTimeout(() => {
-          setCustomApiUrl(target);
-        }, 1200);
-      } else {
-        setHealthResult(`Response received: ${JSON.stringify(res.data)}`);
-      }
-    } catch (e: any) {
-      setHealthResult(`❌ Connection Failed: ${e.message || 'Server Unreachable'}. Please check backend URL and server status.`);
-    } finally {
-      setHealthTesting(false);
+    const check = await validateBackendHealth(target);
+    if (check.valid) {
+      setHealthResult(`${check.message} Saving & Reloading...`);
+      setTimeout(() => {
+        setCustomApiUrl(target);
+      }, 1200);
+    } else {
+      setHealthResult(check.error || "❌ Backend server unavailable.");
     }
+    setHealthTesting(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username || !password) {
       setError("Please fill in all fields.");
+      return;
+    }
+
+    if (isFrontendUrl(API_URL)) {
+      setError("Incorrect API Server URL. You are pointing to the Netlify Frontend (https://agentkaruppu.netlify.app) instead of your FastAPI backend server. Please enter your backend server URL below.");
+      setShowApiConfig(true);
       return;
     }
 
@@ -59,7 +59,14 @@ export default function Login() {
       const response = await axios.post(`${API_URL}/login`, {
         username,
         password
+      }, {
+        headers: { Accept: 'application/json' }
       });
+
+      // HTML response check
+      if (typeof response.data === 'string' && (response.data.includes('<!DOCTYPE') || response.data.includes('<html'))) {
+        throw new Error("HTML_RESPONSE_DETECTED");
+      }
 
       console.log("[Auth Login] Login successful:", response.data);
       const { access_token, role, status } = response.data;
@@ -81,20 +88,25 @@ export default function Login() {
       let msg = "Failed to log in. Please try again.";
       const status = err.response?.status;
       const detail = err.response?.data?.detail;
+      const isHtmlResponse = err.message === "HTML_RESPONSE_DETECTED" || 
+        (err.response && typeof err.response.data === 'string' && (err.response.data.includes('<!DOCTYPE') || err.response.data.includes('<html')));
 
-      if (detail) {
+      if (isHtmlResponse) {
+        msg = "Incorrect API Server URL. You are pointing to the Netlify Frontend (https://agentkaruppu.netlify.app) instead of your FastAPI backend server. Please enter your actual FastAPI backend server URL below.";
+        setShowApiConfig(true);
+      } else if (detail) {
         msg = detail;
       } else if (status === 401) {
         msg = "Invalid credentials. Please verify your username and password.";
       } else if (status === 403) {
         msg = "Account pending administrator approval or deactivated.";
       } else if (status === 404) {
-        msg = `Authentication endpoint not found at ${API_URL}/login (404).`;
+        msg = `Authentication endpoint not found at ${API_URL}/login (404). Please verify your backend API URL below.`;
         setShowApiConfig(true);
       } else if (status === 500) {
         msg = "Backend server or database error (500). Please contact administrator.";
       } else if (!err.response) {
-        msg = `Network Connection Error (${err.message || 'Server Unreachable'}). Unable to reach backend API at ${API_URL}. Please check internet connection or server CORS settings.`;
+        msg = `Backend API server is unavailable (${err.message || 'Server Unreachable'}). Unable to reach API at ${API_URL}. Please check your backend URL below.`;
         setShowApiConfig(true);
       }
 
@@ -142,16 +154,16 @@ export default function Login() {
         {showApiConfig && (
           <div className="mb-6 p-4 rounded-2xl bg-slate-950/90 border border-purple-500/30 space-y-3 relative shadow-2xl">
             <div className="flex items-center justify-between text-xs font-bold text-slate-300">
-              <span>Backend API Server Target</span>
+              <span>FastAPI Backend Server Target</span>
               <span className="text-[10px] text-purple-400 font-mono">Current: {API_URL}</span>
             </div>
-            <p className="text-[11px] text-slate-400">Enter your live backend URL (e.g. Render, Ngrok, or Local IP) to connect from mobile:</p>
+            <p className="text-[11px] text-slate-400">Enter your actual FastAPI backend URL (e.g. Render, Railway, VPS, or Ngrok):</p>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={customUrlInput}
                 onChange={(e) => setCustomUrlInput(e.target.value)}
-                placeholder="e.g. https://your-backend.onrender.com"
+                placeholder="https://your-backend.onrender.com or http://192.168.x.x:8000"
                 className="flex-1 px-3 py-2 text-xs rounded-xl bg-slate-900 border border-slate-800 text-slate-200 outline-none focus:border-purple-500 font-mono"
               />
               <button
@@ -164,7 +176,7 @@ export default function Login() {
               </button>
             </div>
             {healthResult && (
-              <p className={`text-[11px] font-mono leading-relaxed ${healthResult.includes("✓") ? "text-green-400" : "text-red-400"}`}>
+              <p className={`text-[11px] font-mono leading-relaxed ${healthResult.includes("✅") ? "text-green-400" : "text-red-400"}`}>
                 {healthResult}
               </p>
             )}
