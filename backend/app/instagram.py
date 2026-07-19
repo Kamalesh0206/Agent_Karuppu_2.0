@@ -1,22 +1,28 @@
 import time
 import os
 import requests
+import json
 import logging
+from datetime import datetime, timedelta
+from typing import List, Optional
+from .config import settings
+from .database import SessionLocal
+from .models import PublishingLog, AuditLog
 
 logger = logging.getLogger("instagram_client")
-logging.basicConfig(level=logging.INFO)
 
 class InstagramAPIError(Exception):
     """Custom exception for Instagram Graph API failures."""
-    def __init__(self, message, status_code=None, fb_error_code=None, error_subcode=None, raw_response=None):
+    def __init__(self, message, status_code=None, fb_error_code=None, error_subcode=None, fbtrace_id=None, raw_response=None):
         super().__init__(message)
         self.status_code = status_code
         self.fb_error_code = fb_error_code
         self.error_subcode = error_subcode
+        self.fbtrace_id = fbtrace_id
         self.raw_response = raw_response
 
 class InstagramClient:
-    GRAPH_API_VERSION = "v18.0"
+    GRAPH_API_VERSION = "v25.0"
     BASE_URL = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
 
     @classmethod
@@ -43,8 +49,20 @@ class InstagramClient:
         return session
 
     @classmethod
-    def _log_request(cls, method: str, url: str, params: dict = None, json_data: dict = None, response: requests.Response = None, error: Exception = None):
-        # Mask access token
+    def _log_request(
+        cls,
+        method: str,
+        url: str,
+        params: dict = None,
+        json_data: dict = None,
+        response: requests.Response = None,
+        error: Exception = None,
+        duration: float = 0.0,
+        username: str = None,
+        queue_id: int = None,
+        retry_count: int = 0
+    ):
+        # Mask access token for security logs
         masked_params = {}
         if params:
             for k, v in params.items():
@@ -61,21 +79,93 @@ class InstagramClient:
                 else:
                     masked_json[k] = v
 
-        log_msg = f"[Instagram API Request] Method: {method.upper()} | URL: {url} | Params: {masked_params} | JSON: {masked_json}"
+        payload = masked_params or masked_json
+        api_version = cls.GRAPH_API_VERSION
+        
+        log_msg = (
+            f"[Instagram API Request]\n"
+            f"  Graph API Version: {api_version}\n"
+            f"  Method: {method.upper()}\n"
+            f"  URL: {url}\n"
+            f"  Request Payload (Excluding Token): {json.dumps(payload)}\n"
+        )
+        
+        resp_text = None
+        status_code = None
+        fbtrace_id = None
+        fb_code = None
+        subcode = None
+        msg = None
+        container_id = None
+        pub_status = "PENDING"
+
         if response is not None:
+            status_code = response.status_code
+            fbtrace_id = response.headers.get("x-fb-trace-id")
+            
             try:
                 resp_payload = response.json()
+                resp_text = json.dumps(resp_payload)
+                if response.status_code == 200:
+                    pub_status = "SUCCESS"
+                    container_id = resp_payload.get("id")
+                else:
+                    pub_status = "FAILED"
+                    
+                if "error" in resp_payload:
+                    err_info = resp_payload["error"]
+                    fb_code = str(err_info.get("code"))
+                    subcode = str(err_info.get("error_subcode"))
+                    msg = err_info.get("message")
             except Exception:
+                resp_text = response.text
                 resp_payload = response.text
-            log_msg += f"\n[Instagram API Response] Status: {response.status_code} | Payload: {resp_payload}"
+                pub_status = "FAILED" if response.status_code != 200 else "SUCCESS"
+            
+            log_msg += (
+                f"[Instagram API Response]\n"
+                f"  Publishing Status: {pub_status}\n"
+                f"  HTTP Status Code: {response.status_code}\n"
+            )
+            if container_id:
+                log_msg += f"  Container/Media ID returned by Meta: {container_id}\n"
+            if response.status_code != 200:
+                log_msg += f"  Full Meta Error Response: {resp_text}\n"
+            else:
+                log_msg += f"  Response Payload: {resp_text}\n"
+            
         if error is not None:
-            log_msg += f"\n[Instagram API Error] Details: {str(error)}"
+            log_msg += f"\n[Instagram API Error] Details: {str(error)}\n"
+            msg = str(error)
         
         logger.info(log_msg)
 
+        # Write attempt log to database if queue_id is supplied
+        if queue_id:
+            db = SessionLocal()
+            try:
+                db_log = PublishingLog(
+                    queue_id=queue_id,
+                    http_status=status_code,
+                    meta_error_code=fb_code,
+                    subcode=subcode,
+                    message=msg,
+                    fbtrace_id=fbtrace_id,
+                    request_url=url,
+                    request_body=json.dumps({"params": masked_params, "json": masked_json}),
+                    response=resp_text,
+                    timestamp=datetime.utcnow(),
+                    retry_count=retry_count
+                )
+                db.add(db_log)
+                db.commit()
+            except Exception as db_err:
+                logger.error(f"Failed to save detailed publishing log to database: {db_err}")
+            finally:
+                db.close()
+
     @classmethod
     def is_mock_token(cls, token: str) -> bool:
-        """Determines if the token is a mock/development token."""
         if not token:
             return True
         token = token.strip()
@@ -84,31 +174,122 @@ class InstagramClient:
         return False
 
     @classmethod
-    def verify_token_permissions(cls, access_token: str):
+    def exchange_short_lived_token(cls, short_lived_token: str) -> dict:
         """
-        Verify that the access token contains the required permissions:
-        - instagram_basic
-        - instagram_content_publish
-        - pages_show_list
+        Exchange a short-lived user access token for a long-lived user access token.
+        """
+        if cls.is_mock_token(short_lived_token):
+            return {
+                "access_token": "mock_long_lived_user_token",
+                "expires_in": 5184000  # 60 days
+            }
+
+        url = f"{cls.BASE_URL}/oauth/access_token"
+        params = {
+            "grant_type": "fb_exchange_token",
+            "client_id": settings.FACEBOOK_CLIENT_ID,
+            "client_secret": settings.FACEBOOK_CLIENT_SECRET,
+            "fb_exchange_token": short_lived_token
+        }
+        
+        session = cls._requests_retry_session()
+        try:
+            cls._log_request("GET", url, params=params)
+            response = session.get(url, params=params, timeout=15)
+            cls._log_request("GET", url, params=params, response=response)
+            
+            if response.status_code != 200:
+                err_data = response.json().get("error", {})
+                raise InstagramAPIError(
+                    f"Token exchange failed: {err_data.get('message')}",
+                    status_code=response.status_code,
+                    fb_error_code=err_data.get("code"),
+                    fbtrace_id=response.headers.get("x-fb-trace-id"),
+                    raw_response=response.text
+                )
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            raise InstagramAPIError(f"Network error during long-lived token exchange: {str(e)}")
+
+    @classmethod
+    def get_long_lived_page_token(cls, long_lived_user_token: str, facebook_page_id: str) -> str:
+        """
+        Get a long-lived Page Access Token using the long-lived User Access Token.
+        """
+        if cls.is_mock_token(long_lived_user_token):
+            return "mock_long_lived_page_token"
+
+        url = f"{cls.BASE_URL}/{facebook_page_id}"
+        params = {
+            "fields": "access_token",
+            "access_token": long_lived_user_token
+        }
+        session = cls._requests_retry_session()
+        try:
+            cls._log_request("GET", url, params=params)
+            response = session.get(url, params=params, timeout=15)
+            cls._log_request("GET", url, params=params, response=response)
+            
+            if response.status_code != 200:
+                err_data = response.json().get("error", {})
+                raise InstagramAPIError(
+                    f"Page token fetch failed: {err_data.get('message')}",
+                    status_code=response.status_code,
+                    fb_error_code=err_data.get("code"),
+                    fbtrace_id=response.headers.get("x-fb-trace-id"),
+                    raw_response=response.text
+                )
+            return response.json().get("access_token")
+        except requests.exceptions.RequestException as e:
+            raise InstagramAPIError(f"Network error during page token retrieve: {str(e)}")
+
+    @classmethod
+    def get_instagram_profile_details(cls, instagram_business_id: str, access_token: str) -> dict:
+        """
+        Fetch Instagram Business profile details (name, username, profile picture, followers count).
         """
         if cls.is_mock_token(access_token):
-            logger.info("[MOCK] Verifying permissions for access token.")
-            return
+            return {
+                "username": "mock_instagram_user",
+                "name": "Mock IG Business",
+                "profile_picture_url": "https://placekitten.com/200/200",
+                "followers_count": 1420
+            }
 
-        # The Instagram Graph API for content publishing runs on Facebook Graph API and requires a Page Access Token starting with 'EAA'.
-        # Instagram User tokens (starting with 'IG') are not supported on this endpoint.
-        token_str = access_token.strip()
-        if not token_str.startswith("EAA"):
-            if token_str.startswith("IG"):
+        url = f"{cls.BASE_URL}/{instagram_business_id}"
+        params = {
+            "fields": "id,username,name,profile_picture_url,followers_count",
+            "access_token": access_token
+        }
+        session = cls._requests_retry_session()
+        try:
+            cls._log_request("GET", url, params=params)
+            response = session.get(url, params=params, timeout=15)
+            cls._log_request("GET", url, params=params, response=response)
+            
+            if response.status_code != 200:
+                err_data = response.json().get("error", {})
                 raise InstagramAPIError(
-                    "Invalid token type. The Instagram Graph API for Business publishing requires a Facebook Page Access Token starting with 'EAA'. Tokens starting with 'IG' (Instagram User tokens) are not supported on this endpoint. Please use the Facebook Login flow to generate a Page Access Token.",
-                    status_code=400
+                    f"Profile fetch failed: {err_data.get('message')}",
+                    status_code=response.status_code,
+                    fb_error_code=err_data.get("code"),
+                    fbtrace_id=response.headers.get("x-fb-trace-id"),
+                    raw_response=response.text
                 )
-            else:
-                raise InstagramAPIError(
-                    "Invalid token type. The Instagram Graph API for Business publishing requires a Facebook Page Access Token starting with 'EAA'.",
-                    status_code=400
-                )
+            data = response.json()
+            return {
+                "username": data.get("username"),
+                "name": data.get("name"),
+                "profile_picture_url": data.get("profile_picture_url"),
+                "followers_count": data.get("followers_count", 0)
+            }
+        except requests.exceptions.RequestException as e:
+            raise InstagramAPIError(f"Network error fetching profile details: {str(e)}")
+
+    @classmethod
+    def verify_token_permissions(cls, access_token: str):
+        if cls.is_mock_token(access_token):
+            return
 
         url = f"{cls.BASE_URL}/me/permissions"
         params = {"access_token": access_token}
@@ -122,157 +303,22 @@ class InstagramClient:
             if response.status_code != 200:
                 error_data = response.json().get("error", {})
                 raise InstagramAPIError(
-                    f"Permissions check failed: {error_data.get('message', 'Unknown error')}",
+                    f"Permissions check failed: {error_data.get('message')}",
                     status_code=response.status_code,
                     fb_error_code=error_data.get("code"),
+                    fbtrace_id=response.headers.get("x-fb-trace-id"),
                     raw_response=response.text
                 )
             
             data = response.json().get("data", [])
-            granted_permissions = {item.get("permission") for item in data if item.get("status") == "granted"}
-            
+            granted = {item.get("permission") for item in data if item.get("status") == "granted"}
             required = ["instagram_basic", "instagram_content_publish", "pages_show_list"]
-            missing = [p for p in required if p not in granted_permissions]
+            missing = [p for p in required if p not in granted]
             
             if missing:
-                raise InstagramAPIError(f"Missing required permissions: {', '.join(missing)}. Please re-authenticate and grant all permissions.")
-                
-            logger.info("Access token permissions verified successfully.")
-            
+                raise InstagramAPIError(f"Missing required permissions: {', '.join(missing)}")
         except requests.exceptions.RequestException as e:
-            cls._log_request("GET", url, params=params, error=e)
             raise InstagramAPIError(f"Network error during permissions check: {str(e)}")
-
-    @classmethod
-    def verify_instagram_account_type(cls, instagram_business_id: str, access_token: str):
-        """
-        Verify that the target Instagram account exists and is a Business or Creator account.
-        """
-        if cls.is_mock_token(access_token):
-            logger.info("[MOCK] Verifying Instagram Account Type.")
-            return
-
-        url = f"{cls.BASE_URL}/{instagram_business_id}"
-        params = {
-            "fields": "id,username",
-            "access_token": access_token
-        }
-        session = cls._requests_retry_session()
-        
-        try:
-            cls._log_request("GET", url, params=params)
-            response = session.get(url, params=params, timeout=15)
-            cls._log_request("GET", url, params=params, response=response)
-            
-            if response.status_code != 200:
-                error_data = response.json().get("error", {})
-                raise InstagramAPIError(
-                    f"Failed to verify Instagram account type. Ensure the account is a Business or Creator account: {error_data.get('message', 'Unknown error')}",
-                    status_code=response.status_code,
-                    fb_error_code=error_data.get("code"),
-                    raw_response=response.text
-                )
-            
-            data = response.json()
-            if not data.get("id") or not data.get("username"):
-                raise InstagramAPIError("The linked account does not appear to be a valid Instagram Business or Creator account.")
-                
-            logger.info(f"Verified Instagram account @{data.get('username')} type: Business/Creator.")
-            
-        except requests.exceptions.RequestException as e:
-            cls._log_request("GET", url, params=params, error=e)
-            raise InstagramAPIError(f"Network error during account type check: {str(e)}")
-
-    @classmethod
-    def verify_account(cls, access_token: str) -> str:
-        """
-        Verify the access token and retrieve the linked Instagram Business Account ID.
-        """
-        if cls.is_mock_token(access_token):
-            logger.info("Using mock account verification.")
-            return "17841401234567890"
-
-        token_str = access_token.strip()
-        if not token_str.startswith("EAA"):
-            if token_str.startswith("IG"):
-                raise InstagramAPIError(
-                    "Invalid token type. The Instagram Graph API for Business publishing requires a Facebook Page Access Token starting with 'EAA'. Tokens starting with 'IG' (Instagram User tokens) are not supported on this endpoint. Please use the Facebook Login flow to generate a Page Access Token.",
-                    status_code=400
-                )
-            else:
-                raise InstagramAPIError(
-                    "Invalid token type. The Instagram Graph API for Business publishing requires a Facebook Page Access Token starting with 'EAA'.",
-                    status_code=400
-                )
-
-        session = cls._requests_retry_session()
-        try:
-            # Step 1: Get Facebook Pages managed by this user token
-            pages_url = f"{cls.BASE_URL}/me/accounts"
-            cls._log_request("GET", pages_url, params={"access_token": access_token})
-            response = session.get(pages_url, params={"access_token": access_token}, timeout=15)
-            cls._log_request("GET", pages_url, params={"access_token": access_token}, response=response)
-            
-            if response.status_code != 200:
-                error_data = response.json().get("error", {})
-                raise InstagramAPIError(
-                    f"Failed to fetch FB Pages: {error_data.get('message', 'Unknown error')}",
-                    status_code=response.status_code,
-                    fb_error_code=error_data.get("code"),
-                    error_subcode=error_data.get("error_subcode"),
-                    raw_response=response.text
-                )
-            
-            pages_data = response.json().get("data", [])
-            if not pages_data:
-                # Fallback: check if the token is a Page Access Token
-                me_url = f"{cls.BASE_URL}/me"
-                me_params = {
-                    "fields": "id,instagram_business_account",
-                    "access_token": access_token
-                }
-                cls._log_request("GET", me_url, params=me_params)
-                me_response = session.get(me_url, params=me_params, timeout=15)
-                cls._log_request("GET", me_url, params=me_params, response=me_response)
-                
-                if me_response.status_code == 200:
-                    me_data = me_response.json()
-                    ig_account = me_data.get("instagram_business_account")
-                    if ig_account:
-                        ig_id = ig_account.get("id")
-                        logger.info(f"Successfully retrieved Instagram Business Account ID via Page Access Token fallback: {ig_id}")
-                        return ig_id
-                
-                raise InstagramAPIError("No Facebook Pages linked to this access token. An Instagram Business Account must be connected to a FB Page.")
- 
-            # Step 2: Query each Page to find the linked Instagram Business Account
-            for page in pages_data:
-                page_id = page.get("id")
-                page_token = page.get("access_token")
-                
-                ig_url = f"{cls.BASE_URL}/{page_id}"
-                ig_params = {
-                    "fields": "instagram_business_account",
-                    "access_token": page_token or access_token
-                }
-                
-                cls._log_request("GET", ig_url, params=ig_params)
-                ig_response = session.get(ig_url, params=ig_params, timeout=15)
-                cls._log_request("GET", ig_url, params=ig_params, response=ig_response)
-                
-                if ig_response.status_code == 200:
-                    ig_data = ig_response.json()
-                    ig_account = ig_data.get("instagram_business_account")
-                    if ig_account:
-                        ig_id = ig_account.get("id")
-                        logger.info(f"Successfully retrieved Instagram Business Account ID: {ig_id}")
-                        return ig_id
- 
-            raise InstagramAPIError("Could not find any Instagram Business Account linked to the Facebook Pages.")
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Network error during account verification: {str(e)}")
-            raise InstagramAPIError(f"Network error during account verification: {str(e)}")
 
     @classmethod
     def create_media_container(
@@ -281,102 +327,116 @@ class InstagramClient:
         media_url: str, 
         caption: str, 
         access_token: str, 
-        is_video: bool = False
+        is_video: bool = False,
+        username: str = None,
+        queue_id: int = None,
+        retry_count: int = 0
     ) -> str:
-        """
-        Step 1 of publishing: Create a media container on Instagram.
-        """
         if cls.is_mock_token(access_token):
-            logger.info("Using mock media container creation.")
-            return "18273645901234567"
+            return "18061733975707439"
 
         url = f"{cls.BASE_URL}/{instagram_business_id}/media"
         params = {
             "caption": caption,
             "access_token": access_token
         }
-
         if is_video:
-            params["media_type"] = "VIDEO"
+            params["media_type"] = "REELS"
             params["video_url"] = media_url
         else:
             params["image_url"] = media_url
 
-        session = cls._requests_retry_session()
+        session = cls._requests_retry_session(retries=0)
+        start_time = time.time()
         try:
-            cls._log_request("POST", url, params=params)
+            cls._log_request("POST", url, params=params, username=username, queue_id=queue_id, retry_count=retry_count)
             response = session.post(url, params=params, timeout=20)
-            cls._log_request("POST", url, params=params, response=response)
-            response_json = response.json()
-
-            if response.status_code != 200:
-                error_data = response_json.get("error", {})
-                raise InstagramAPIError(
-                    f"Container creation failed: {error_data.get('message', 'Unknown error')}",
-                    status_code=response.status_code,
-                    fb_error_code=error_data.get("code"),
-                    error_subcode=error_data.get("error_subcode"),
-                    raw_response=response.text
-                )
-
-            creation_id = response_json.get("id")
-            logger.info(f"Created media container: {creation_id}")
-            return creation_id
+            duration = time.time() - start_time
+            cls._log_request("POST", url, params=params, response=response, duration=duration, username=username, queue_id=queue_id, retry_count=retry_count)
             
+            if response.status_code == 200:
+                return response.json().get("id")
+                
+            error_data = response.json().get("error", {})
+            raise InstagramAPIError(
+                error_data.get("message", "Container creation failed"),
+                status_code=response.status_code,
+                fb_error_code=error_data.get("code"),
+                error_subcode=error_data.get("error_subcode"),
+                fbtrace_id=response.headers.get("x-fb-trace-id"),
+                raw_response=response.text
+            )
         except requests.exceptions.RequestException as e:
+            duration = time.time() - start_time
+            cls._log_request("POST", url, params=params, error=e, duration=duration, username=username, queue_id=queue_id, retry_count=retry_count)
             raise InstagramAPIError(f"Network error during media container creation: {str(e)}")
 
     @classmethod
-    def check_container_status(cls, container_id: str, access_token: str) -> dict:
-        """
-        Check the status of a media container. Media processing takes time (especially videos).
-        """
+    def check_container_status(cls, container_id: str, access_token: str, username: str = None, queue_id: int = None, retry_count: int = 0) -> dict:
         if cls.is_mock_token(access_token):
             return {"status_code": "FINISHED"}
 
         url = f"{cls.BASE_URL}/{container_id}"
         params = {
-            "fields": "status_code,error_message",
+            "fields": "status_code",
             "access_token": access_token
         }
-        session = cls._requests_retry_session()
-
+        session = cls._requests_retry_session(retries=0)
+        start_time = time.time()
         try:
-            cls._log_request("GET", url, params=params)
+            cls._log_request("GET", url, params=params, username=username, queue_id=queue_id, retry_count=retry_count)
             response = session.get(url, params=params, timeout=10)
-            cls._log_request("GET", url, params=params, response=response)
+            duration = time.time() - start_time
+            cls._log_request("GET", url, params=params, response=response, duration=duration, username=username, queue_id=queue_id, retry_count=retry_count)
             
-            if response.status_code != 200:
-                error_data = response.json().get("error", {})
-                raise InstagramAPIError(
-                    f"Failed to check container status: {error_data.get('message')}",
-                    status_code=response.status_code,
-                    raw_response=response.text
-                )
-            return response.json()
+            if response.status_code == 200:
+                return response.json()
+                
+            error_data = response.json().get("error", {})
+            raise InstagramAPIError(
+                error_data.get("message", "Check container status failed"),
+                status_code=response.status_code,
+                fb_error_code=error_data.get("code"),
+                error_subcode=error_data.get("error_subcode"),
+                fbtrace_id=response.headers.get("x-fb-trace-id"),
+                raw_response=response.text
+            )
         except requests.exceptions.RequestException as e:
+            duration = time.time() - start_time
+            cls._log_request("GET", url, params=params, error=e, duration=duration, username=username, queue_id=queue_id, retry_count=retry_count)
             raise InstagramAPIError(f"Network error checking container status: {str(e)}")
 
     @classmethod
-    def wait_for_container_processing(cls, container_id: str, access_token: str, timeout: int = 180, interval: int = 5):
-        """
-        Poll the media container status until processing completes, publishes, or fails.
-        """
+    def wait_for_container_processing(cls, container_id: str, access_token: str, timeout: int = 60, interval: int = 2, username: str = None, queue_id: int = None, retry_count: int = 0):
         if cls.is_mock_token(access_token):
             time.sleep(1)
             return
 
         elapsed = 0
+        url = f"{cls.BASE_URL}/{container_id}"
         while elapsed < timeout:
-            status_info = cls.check_container_status(container_id, access_token)
+            status_info = cls.check_container_status(container_id, access_token, username=username, queue_id=queue_id, retry_count=retry_count)
             status_code = status_info.get("status_code")
             logger.info(f"Media container {container_id} status: {status_code}")
 
             if status_code in ["FINISHED", "PUBLISHED"]:
                 return
             elif status_code in ["ERROR", "EXPIRED"]:
-                error_msg = status_info.get("error_message", "Unknown container processing error.")
+                error_msg = "Unknown container processing error."
+                try:
+                    err_params = {
+                        "fields": "error_message",
+                        "access_token": access_token
+                    }
+                    err_res = cls._requests_retry_session(retries=0).get(url, params=err_params, timeout=5)
+                    if err_res.status_code == 200:
+                        error_msg = err_res.json().get("error_message", error_msg)
+                except Exception:
+                    pass
                 raise InstagramAPIError(f"Media container processing failed: {error_msg}")
+
+            time.sleep(interval)
+            elapsed += interval
 
             time.sleep(interval)
             elapsed += interval
@@ -384,51 +444,51 @@ class InstagramClient:
         raise InstagramAPIError("Media container processing timed out on Instagram servers.")
 
     @classmethod
-    def publish_media_container(cls, instagram_business_id: str, creation_id: str, access_token: str) -> str:
-        """
-        Step 2 of publishing: Publish the created media container.
-        """
+    def publish_media_container(
+        cls, 
+        instagram_business_id: str, 
+        creation_id: str, 
+        access_token: str, 
+        username: str = None,
+        queue_id: int = None,
+        retry_count: int = 0
+    ) -> str:
         if cls.is_mock_token(access_token):
-            logger.info("Using mock media container publishing.")
-            return "17945612349876543"
+            return "17874299352621972"
 
         url = f"{cls.BASE_URL}/{instagram_business_id}/media_publish"
         params = {
             "creation_id": creation_id,
             "access_token": access_token
         }
-        session = cls._requests_retry_session()
-
+        session = cls._requests_retry_session(retries=0)
+        start_time = time.time()
         try:
-            cls._log_request("POST", url, params=params)
+            cls._log_request("POST", url, params=params, username=username, queue_id=queue_id, retry_count=retry_count)
             response = session.post(url, params=params, timeout=20)
-            cls._log_request("POST", url, params=params, response=response)
-            response_json = response.json()
-
-            if response.status_code != 200:
-                error_data = response_json.get("error", {})
-                raise InstagramAPIError(
-                    f"Publishing container failed: {error_data.get('message', 'Unknown error')}",
-                    status_code=response.status_code,
-                    fb_error_code=error_data.get("code"),
-                    error_subcode=error_data.get("error_subcode"),
-                    raw_response=response.text
-                )
-
-            media_id = response_json.get("id")
-            logger.info(f"Successfully published post, media ID: {media_id}")
-            return media_id
+            duration = time.time() - start_time
+            cls._log_request("POST", url, params=params, response=response, duration=duration, username=username, queue_id=queue_id, retry_count=retry_count)
             
+            if response.status_code == 200:
+                return response.json().get("id")
+                
+            error_data = response.json().get("error", {})
+            raise InstagramAPIError(
+                error_data.get("message", "Container publication failed"),
+                status_code=response.status_code,
+                fb_error_code=error_data.get("code"),
+                error_subcode=error_data.get("error_subcode"),
+                fbtrace_id=response.headers.get("x-fb-trace-id"),
+                raw_response=response.text
+            )
         except requests.exceptions.RequestException as e:
+            duration = time.time() - start_time
+            cls._log_request("POST", url, params=params, error=e, duration=duration, username=username, queue_id=queue_id, retry_count=retry_count)
             raise InstagramAPIError(f"Network error during container publishing: {str(e)}")
 
     @classmethod
-    def verify_published_post(cls, media_id: str, access_token: str) -> bool:
-        """
-        Verify that the newly published media exists on Instagram.
-        """
+    def verify_published_post(cls, media_id: str, access_token: str, username: str = None, queue_id: int = None, retry_count: int = 0) -> bool:
         if cls.is_mock_token(access_token):
-            logger.info(f"[MOCK] Verifying published post exists. Media ID: {media_id}")
             return True
 
         url = f"{cls.BASE_URL}/{media_id}"
@@ -436,203 +496,100 @@ class InstagramClient:
             "fields": "id,ig_id,media_type,timestamp,permalink",
             "access_token": access_token
         }
-        session = cls._requests_retry_session()
-
+        session = cls._requests_retry_session(retries=0)
+        start_time = time.time()
         try:
-            cls._log_request("GET", url, params=params)
+            cls._log_request("GET", url, params=params, username=username, queue_id=queue_id, retry_count=retry_count)
             response = session.get(url, params=params, timeout=15)
-            cls._log_request("GET", url, params=params, response=response)
+            duration = time.time() - start_time
+            cls._log_request("GET", url, params=params, response=response, duration=duration, username=username, queue_id=queue_id, retry_count=retry_count)
 
             if response.status_code == 200:
                 data = response.json()
                 if data.get("id") == media_id:
-                    logger.info(f"Post verified successfully. Confirmed Instagram Post Exists: {media_id}")
                     return True
-
+            
             error_data = response.json().get("error", {})
             raise InstagramAPIError(
-                f"Post verification failed. Media ID does not exist or is unreachable: {error_data.get('message', 'Unknown error')}",
+                error_data.get("message", "Post verification failed"),
                 status_code=response.status_code,
+                fb_error_code=error_data.get("code"),
+                fbtrace_id=response.headers.get("x-fb-trace-id"),
                 raw_response=response.text
             )
-
         except requests.exceptions.RequestException as e:
-            cls._log_request("GET", url, params=params, error=e)
+            duration = time.time() - start_time
+            cls._log_request("GET", url, params=params, error=e, duration=duration, username=username, queue_id=queue_id, retry_count=retry_count)
             raise InstagramAPIError(f"Network error verifying published post: {str(e)}")
 
     @classmethod
     def verify_and_resolve_account(cls, username: str, access_token: str, facebook_page_id: str = None) -> dict:
-        """
-        Verify that an Instagram account exists and is eligible to be connected.
-        Workflow:
-        1. Receive username, token, optional Page ID.
-        2. Verify existence using Graph API (or mock).
-        3. Verify account type, linking to FB page, permissions, and token validity.
-        4. Validate that user-supplied username matches the API record.
-        5. Return Success or Failure.
-        """
         if cls.is_mock_token(access_token):
-            username_lower = username.lower().strip()
-            token_lower = access_token.lower().strip() if access_token else ""
-            
-            if username_lower == "non_existent":
-                return {
-                    "status": "rejected",
-                    "reason": "Account not found"
-                }
-            if "invalid" in token_lower:
-                return {
-                    "status": "rejected",
-                    "reason": "Invalid token"
-                }
-            if "missing_permissions" in token_lower:
-                return {
-                    "status": "rejected",
-                    "reason": "Missing permissions"
-                }
-            if "no_page" in token_lower:
-                return {
-                    "status": "rejected",
-                    "reason": "Instagram account is not linked to a Facebook Page"
-                }
-                
-            # Default mock success
-            import datetime
             return {
                 "status": "verified",
-                "instagram_account_id": "17841401234567890",
+                "instagram_account_id": "17841451223163815",
                 "username": username,
                 "account_type": "business",
                 "token_status": "valid",
-                "facebook_page_id": facebook_page_id or "1234567890",
-                "token_expiry_time": datetime.datetime.utcnow() + datetime.timedelta(days=60)
+                "facebook_page_id": facebook_page_id or "1233050003216359",
+                "token_expiry_time": datetime.utcnow() + timedelta(days=60),
+                "profile_picture": "https://placekitten.com/200/200",
+                "business_name": "Mock Business Name",
+                "followers_count": 5280
             }
 
         try:
-            # 1. Verify token permissions and EAA prefix
-            cls.verify_token_permissions(access_token)
-            
-            # 2. Retrieve linked Instagram Business Account ID and Facebook Page ID
             session = cls._requests_retry_session()
-            pages_url = f"{cls.BASE_URL}/me/accounts"
-            cls._log_request("GET", pages_url, params={"access_token": access_token})
-            response = session.get(pages_url, params={"access_token": access_token}, timeout=15)
-            cls._log_request("GET", pages_url, params={"access_token": access_token}, response=response)
-            
-            if response.status_code != 200:
-                error_data = response.json().get("error", {})
-                return {
-                    "status": "rejected",
-                    "reason": f"Invalid token: {error_data.get('message', 'Unknown error')}"
-                }
+            resolved_page_id = facebook_page_id
+
+            # Step 1: Validate/resolve Facebook Page ID.
+            if not resolved_page_id:
+                pages_url = f"{cls.BASE_URL}/me/accounts"
+                cls._log_request("GET", pages_url, params={"access_token": access_token})
+                response = session.get(pages_url, params={"access_token": access_token}, timeout=15)
+                cls._log_request("GET", pages_url, params={"access_token": access_token}, response=response)
                 
-            pages_data = response.json().get("data", [])
-            if not pages_data:
-                return {
-                    "status": "rejected",
-                    "reason": "Instagram account is not linked to a Facebook Page"
-                }
+                if response.status_code == 200:
+                    pages_data = response.json().get("data", [])
+                    if pages_data:
+                        resolved_page_id = pages_data[0].get("id")
                 
-            ig_business_id = None
-            resolved_page_id = None
-            
-            # Filter pages if facebook_page_id is provided
-            target_pages = pages_data
-            if facebook_page_id:
-                target_pages = [p for p in pages_data if p.get("id") == facebook_page_id]
-                if not target_pages:
-                    return {
-                        "status": "rejected",
-                        "reason": f"Facebook Page ID {facebook_page_id} is not managed by this account"
-                    }
-                    
-            for page in target_pages:
-                page_id = page.get("id")
-                page_token = page.get("access_token")
-                
-                ig_url = f"{cls.BASE_URL}/{page_id}"
-                ig_params = {
-                    "fields": "instagram_business_account",
-                    "access_token": page_token or access_token
-                }
-                
-                cls._log_request("GET", ig_url, params=ig_params)
-                ig_response = session.get(ig_url, params=ig_params, timeout=15)
-                cls._log_request("GET", ig_url, params=ig_params, response=ig_response)
-                
-                if ig_response.status_code == 200:
-                    ig_data = ig_response.json()
-                    ig_account = ig_data.get("instagram_business_account")
-                    if ig_account:
-                        ig_business_id = ig_account.get("id")
-                        resolved_page_id = page_id
-                        break
-                        
-            if not ig_business_id:
-                # Fallback: check if the token is a Page Access Token
-                me_url = f"{cls.BASE_URL}/me"
-                me_params = {
-                    "fields": "id,instagram_business_account",
-                    "access_token": access_token
-                }
-                cls._log_request("GET", me_url, params=me_params)
-                me_response = session.get(me_url, params=me_params, timeout=15)
-                cls._log_request("GET", me_url, params=me_params, response=me_response)
-                
-                if me_response.status_code == 200:
-                    me_data = me_response.json()
-                    ig_account = me_data.get("instagram_business_account")
-                    if ig_account:
-                        ig_business_id = ig_account.get("id")
-                        resolved_page_id = me_data.get("id")
-                        
-                        # Verify against user-supplied page ID if provided
-                        if facebook_page_id and resolved_page_id != facebook_page_id:
-                            return {
-                                "status": "rejected",
-                                "reason": f"Facebook Page ID {facebook_page_id} does not match the page for this token ({resolved_page_id})"
-                            }
-                
-                if not ig_business_id:
-                    return {
-                        "status": "rejected",
-                        "reason": "Instagram account is not linked to a Facebook Page"
-                    }
-                
-            # 3. Verify Instagram account existence and eligibility
-            url = f"{cls.BASE_URL}/{ig_business_id}"
+                if not resolved_page_id:
+                    return {"status": "rejected", "reason": "Invalid or expired Page Access Token."}
+
+            # Step 2: GET /{page-id}?fields=id,name,instagram_business_account
+            page_url = f"{cls.BASE_URL}/{resolved_page_id}"
             params = {
-                "fields": "id,username",
+                "fields": "id,name,instagram_business_account",
                 "access_token": access_token
             }
-            cls._log_request("GET", url, params=params)
-            response = session.get(url, params=params, timeout=15)
-            cls._log_request("GET", url, params=params, response=response)
-            
-            if response.status_code != 200:
-                return {
-                    "status": "rejected",
-                    "reason": "Account not found"
-                }
-                
-            data = response.json()
-            api_username = data.get("username")
+            cls._log_request("GET", page_url, params=params)
+            page_response = session.get(page_url, params=params, timeout=15)
+            cls._log_request("GET", page_url, params=params, response=page_response)
+
+            if page_response.status_code != 200:
+                err_data = page_response.json().get("error", {})
+                return {"status": "rejected", "reason": "Invalid or expired Page Access Token."}
+
+            page_data = page_response.json()
+            ig_account = page_data.get("instagram_business_account")
+            if not ig_account:
+                return {"status": "rejected", "reason": "This Facebook Page is not linked to an Instagram Business Account."}
+
+            ig_business_id = ig_account.get("id")
+
+            # Step 3: GET /{ig_business_id}?fields=id,username,name,profile_picture_url,followers_count
+            details = cls.get_instagram_profile_details(ig_business_id, access_token)
+            api_username = details.get("username")
+
             if not api_username:
-                return {
-                    "status": "rejected",
-                    "reason": "Account not found"
-                }
-                
-            # 4. Confirm username matches the returned API profile username
+                return {"status": "rejected", "reason": "Unable to fetch Instagram username from Graph API."}
+
+            # Step 4: Validate Username (ignore case, trim spaces)
             if username.lower().strip() != api_username.lower().strip():
-                return {
-                    "status": "rejected",
-                    "reason": f"Username does not match the returned account information (expected {api_username})"
-                }
-                
-            import datetime
-            token_expiry = datetime.datetime.utcnow() + datetime.timedelta(days=60)
-            
+                return {"status": "rejected", "reason": "The supplied Instagram username does not belong to this Facebook Page."}
+
+            # Step 5: Return verification success details
             return {
                 "status": "verified",
                 "instagram_account_id": ig_business_id,
@@ -640,16 +597,212 @@ class InstagramClient:
                 "account_type": "business",
                 "token_status": "valid",
                 "facebook_page_id": resolved_page_id,
-                "token_expiry_time": token_expiry
-            }
-            
-        except InstagramAPIError as e:
-            return {
-                "status": "rejected",
-                "reason": str(e)
+                "token_expiry_time": datetime.utcnow() + timedelta(days=60),
+                "profile_picture": details.get("profile_picture_url"),
+                "business_name": details.get("name") or page_data.get("name") or "Instagram Business",
+                "followers_count": details.get("followers_count", 0)
             }
         except Exception as e:
-            return {
-                "status": "rejected",
-                "reason": f"Verification error: {str(e)}"
+            import traceback
+            import sys
+            tb = traceback.format_exc()
+            frame = sys.exc_info()[2].tb_frame
+            filename = frame.f_code.co_filename
+            func_name = frame.f_code.co_name
+            line_no = sys.exc_info()[2].tb_lineno
+            logger.error(f"Verification error in {filename}:{func_name} at line {line_no}: {str(e)}\nTraceback:\n{tb}")
+            return {"status": "rejected", "reason": f"Verification error: {str(e)}"}
+
+    @classmethod
+    def validate_access_token(cls, token: str) -> dict:
+        if cls.is_mock_token(token):
+            return {"valid": True, "type": "User/Page", "name": "Mock Account"}
+            
+        url = f"{cls.BASE_URL}/me"
+        params = {
+            "fields": "id,name",
+            "access_token": token
+        }
+        try:
+            response = requests.get(url, params=params, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                return {"valid": True, "id": data.get("id"), "name": data.get("name")}
+            else:
+                err = response.json().get("error", {}).get("message", "Invalid Token")
+                return {"valid": False, "reason": err}
+        except Exception as e:
+            return {"valid": False, "reason": str(e)}
+
+    @classmethod
+    def resolve_accounts_from_token(cls, token: str) -> list:
+        if cls.is_mock_token(token):
+            return [
+                {
+                    "instagram_business_id": "17841401234567890",
+                    "username": "mock_instagram_user_1",
+                    "facebook_page_id": "10485769213",
+                    "facebook_page_name": "Mock Page Marketing 1",
+                    "followers_count": 1420,
+                    "profile_picture": "https://placekitten.com/200/200",
+                    "business_name": "Mock Business 1"
+                },
+                {
+                    "instagram_business_id": "17841401234567891",
+                    "username": "mock_instagram_user_2",
+                    "facebook_page_id": "10485769214",
+                    "facebook_page_name": "Mock Page Marketing 2",
+                    "followers_count": 520,
+                    "profile_picture": "https://placekitten.com/200/200",
+                    "business_name": "Mock Business 2"
+                }
+            ]
+            
+        accounts = []
+        try:
+            url = f"{cls.BASE_URL}/me/accounts"
+            params = {"access_token": token}
+            res = requests.get(url, params=params, timeout=15)
+            if res.status_code != 200:
+                return []
+                
+            pages = res.json().get("data", [])
+            for page in pages:
+                page_id = page.get("id")
+                page_name = page.get("name")
+                page_token = page.get("access_token") or token
+                
+                ig_url = f"{cls.BASE_URL}/{page_id}"
+                ig_params = {"fields": "instagram_business_account", "access_token": page_token}
+                ig_res = requests.get(ig_url, params=ig_params, timeout=15)
+                if ig_res.status_code == 200:
+                    biz_data = ig_res.json().get("instagram_business_account")
+                    if biz_data:
+                        biz_id = biz_data.get("id")
+                        
+                        details = cls.get_instagram_profile_details(biz_id, page_token)
+                        accounts.append({
+                            "instagram_business_id": biz_id,
+                            "username": details.get("username", "Unknown"),
+                            "facebook_page_id": page_id,
+                            "facebook_page_name": page_name,
+                            "followers_count": details.get("followers_count", 0),
+                            "profile_picture": details.get("profile_picture_url") or "https://placekitten.com/200/200",
+                            "business_name": details.get("name") or page_name or "Instagram Business"
+                        })
+        except Exception as e:
+            logger.error(f"Failed to resolve accounts from token: {e}")
+        return accounts
+
+    @classmethod
+    def fetch_recent_posts(cls, instagram_business_id: str, access_token: str) -> list:
+        if cls.is_mock_token(access_token) or (instagram_business_id and "mock" in instagram_business_id.lower()):
+            import random
+            from datetime import datetime, timedelta
+            posts = []
+            captions = [
+                "Loving this weather today! #vibes #nature #explore",
+                "New launch dropping tomorrow at 9 AM IST. Stay tuned! 🚀",
+                "Behind the scenes of our latest campaign shoot. #creative #crew",
+                "Quick tip: ALWAYS validate your access scopes first! 💡",
+                "Weekly highlights from the team. Hard work pays off! 🎉"
+            ]
+            for i in range(5):
+                media_id = f"mock_media_{random.randint(100000, 999999)}"
+                posts.append({
+                    "media_id": media_id,
+                    "permalink": f"https://instagram.com/p/mock_permalink_{i}/",
+                    "media_url": f"https://picsum.photos/400/400?random={i}",
+                    "caption": captions[i],
+                    "media_type": "IMAGE" if i % 2 == 0 else "VIDEO",
+                    "like_count": random.randint(15, 250),
+                    "comment_count": random.randint(2, 35),
+                    "published_at": datetime.utcnow() - timedelta(days=i, hours=i * 2)
+                })
+            return posts
+
+        posts = []
+        try:
+            url = f"{cls.BASE_URL}/{instagram_business_id}/media"
+            params = {
+                "fields": "id,caption,media_url,media_type,like_count,comments_count,timestamp,permalink",
+                "access_token": access_token,
+                "limit": 20
             }
+            res = requests.get(url, params=params, timeout=15)
+            if res.status_code == 200:
+                data = res.json().get("data", [])
+                for item in data:
+                    pub_time = None
+                    if item.get("timestamp"):
+                        try:
+                            from dateutil.parser import parse
+                            pub_time = parse(item.get("timestamp"))
+                        except Exception:
+                            pass
+                    posts.append({
+                        "media_id": item.get("id"),
+                        "permalink": item.get("permalink"),
+                        "media_url": item.get("media_url"),
+                        "caption": item.get("caption"),
+                        "media_type": item.get("media_type"),
+                        "like_count": item.get("like_count", 0),
+                        "comment_count": item.get("comments_count", 0),
+                        "published_at": pub_time
+                    })
+        except Exception as e:
+            logger.error(f"Failed to fetch recent posts from Meta Graph: {e}")
+        return posts
+
+    @classmethod
+    def fetch_post_comments(cls, media_id: str, access_token: str) -> list:
+        if cls.is_mock_token(access_token) or (media_id and "mock" in media_id.lower()):
+            from datetime import datetime, timedelta
+            return [
+                {
+                    "id": "c1",
+                    "username": "karuppu_fan_1",
+                    "text": "This is an amazing post! Keep it up!",
+                    "timestamp": datetime.utcnow() - timedelta(hours=2)
+                },
+                {
+                    "id": "c2",
+                    "username": "tamil_coder",
+                    "text": "Super clean setup. Loving the UI updates.",
+                    "timestamp": datetime.utcnow() - timedelta(hours=4)
+                },
+                {
+                    "id": "c3",
+                    "username": "nature_lover_99",
+                    "text": "Stunning visuals! 👏",
+                    "timestamp": datetime.utcnow() - timedelta(hours=6)
+                }
+            ]
+
+        comments = []
+        try:
+            url = f"{cls.BASE_URL}/{media_id}/comments"
+            params = {
+                "fields": "id,text,username,timestamp",
+                "access_token": access_token
+            }
+            res = requests.get(url, params=params, timeout=15)
+            if res.status_code == 200:
+                data = res.json().get("data", [])
+                for item in data:
+                    c_time = None
+                    if item.get("timestamp"):
+                        try:
+                            from dateutil.parser import parse
+                            c_time = parse(item.get("timestamp"))
+                        except Exception:
+                            pass
+                    comments.append({
+                        "id": item.get("id"),
+                        "username": item.get("username", "Anonymous"),
+                        "text": item.get("text", ""),
+                        "timestamp": c_time
+                    })
+        except Exception as e:
+            logger.error(f"Failed to fetch post comments from Meta Graph: {e}")
+        return comments

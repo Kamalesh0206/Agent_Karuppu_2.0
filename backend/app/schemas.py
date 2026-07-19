@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 from pydantic import BaseModel
 
@@ -25,8 +25,8 @@ class UserResponse(BaseModel):
     email_verified: bool
     mobile_verified: bool
     publishing_permission: bool
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
+    created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True
@@ -53,6 +53,17 @@ class TokenData(BaseModel):
     role: Optional[str] = None
 
 # Instagram Account Schemas
+class InstagramAccountCreate(BaseModel):
+    instagram_username_or_email: str
+    access_token: str
+    facebook_page_id: Optional[str] = None
+
+class InstagramAccountUpdate(BaseModel):
+    access_token: Optional[str] = None
+    facebook_page_id: Optional[str] = None
+    group_name: Optional[str] = None
+    group_id: Optional[int] = None
+
 class InstagramAccountResponse(BaseModel):
     id: int
     user_id: int
@@ -61,48 +72,161 @@ class InstagramAccountResponse(BaseModel):
     facebook_page_name: Optional[str] = None
     instagram_business_id: Optional[str] = None
     instagram_username: Optional[str] = None
-    token_expiry: Optional[datetime.datetime] = None
+    profile_picture: Optional[str] = None
+    business_name: Optional[str] = None
+    followers_count: int = 0
+    token_expiry: Optional[datetime] = None
     status: str
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
+    group_name: Optional[str] = None
+    group_id: Optional[int] = None
+    created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True
 
-# Publishing Schemas
-class PublishRequest(BaseModel):
+# Post Schemas
+class PostCreate(BaseModel):
     caption: Optional[str] = ""
-    hashtags: Optional[str] = ""
-    account_ids: List[int]
-    media_path: str
+    media_url: str
+    media_type: str  # "IMAGE", "REELS"
 
-class PublishingLogResponse(BaseModel):
+class PostResponse(BaseModel):
     id: int
     user_id: int
-    account_id: int
-    instagram_username: Optional[str] = None
-    media_type: str
     caption: Optional[str] = None
-    hashtags: Optional[str] = None
-    status: str
-    error_message: Optional[str] = None
-    post_id: Optional[str] = None
-    published_at: datetime.datetime
-    created_at: datetime.datetime
-    updated_at: Optional[datetime.datetime] = None
+    media_url: str
+    media_type: str
+    created_at: datetime
 
     class Config:
         from_attributes = True
 
-# Log Schemas
-class LogResponse(BaseModel):
+# Publishing Queue Schemas
+class PublishRequest(BaseModel):
+    caption: Optional[str] = ""
+    account_ids: List[int]
+    media_url: str
+    media_type: str
+    onedrive_share_url: Optional[str] = None
+    direct_download_url: Optional[str] = None
+    filename: Optional[str] = None
+    mime_type: Optional[str] = None
+    file_size: Optional[int] = None
+
+class PublishingQueueResponse(BaseModel):
+    id: int
+    post_id: int
+    account_id: int
+    status: str
+    progress_percent: int
+    current_step: Optional[str] = None
+    elapsed_time: int
+    retry_count: int
+    created_at: datetime
+    updated_at: datetime
+    post: PostResponse
+    account: InstagramAccountResponse
+
+    class Config:
+        from_attributes = True
+
+# Publishing History Schemas
+class PublishingHistoryResponse(BaseModel):
+    id: int
+    post_id: int
+    account_id: int
+    media_id: str
+    published_time: datetime
+    caption: Optional[str] = None
+    media_url: Optional[str] = None
+    username: str
+
+    class Config:
+        from_attributes = True
+
+# Publishing Log Schemas
+class PublishingLogResponse(BaseModel):
+    id: int
+    queue_id: int
+    http_status: Optional[int] = None
+    meta_error_code: Optional[str] = None
+    subcode: Optional[str] = None
+    message: Optional[str] = None
+    fbtrace_id: Optional[str] = None
+    request_url: Optional[str] = None
+    request_body: Optional[str] = None
+    response: Optional[str] = None
+    timestamp: datetime
+    retry_count: int
+
+    class Config:
+        from_attributes = True
+
+# Audit Log Schemas
+class AuditLogResponse(BaseModel):
     id: int
     user_id: Optional[int] = None
-    username: Optional[str] = None
     action: str
     description: str
     ip_address: Optional[str] = None
-    created_at: datetime.datetime
+    created_at: datetime
 
     class Config:
         from_attributes = True
+
+# AI Schemas
+class OptimizeRequest(BaseModel):
+    caption: str
+
+class OptimizeResponse(BaseModel):
+    optimized_caption: str
+
+class HashtagResponse(BaseModel):
+    hashtags: List[str]
+
+class EmojiResponse(BaseModel):
+    emojis: List[str]
+
+class TranslateRequest(BaseModel):
+    caption: str
+    target_lang: str
+
+class TranslateResponse(BaseModel):
+    translated_caption: str
+
+class QualityScoreResponse(BaseModel):
+    score: int
+
+class ValidateLinkRequest(BaseModel):
+    url: str
+
+class ValidateLinkResponse(BaseModel):
+    valid: bool
+    filename: str
+    mime_type: str
+    size: int
+    direct_download_url: str
+    media_type: str
+
+class GroupCreate(BaseModel):
+    name: str
+
+class GroupUpdate(BaseModel):
+    name: str
+
+class GroupResponse(BaseModel):
+    id: int
+    user_id: int
+    name: str
+    account_count: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class TokenUpdatePayload(BaseModel):
+    access_token: str
+    validate_token: bool = True
+    account_ids: Optional[List[int]] = None

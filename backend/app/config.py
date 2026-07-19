@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Agent Karuppu"
     
     # Database Settings
-    DATABASE_URL: str = "sqlite:///./ig_publisher.db"
+    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/agent_karuppu"
     
     # Security Settings
     JWT_SECRET_KEY: str = "supersecretjwtkeyfordevelopmentpurposeonlychangeinproduction"
@@ -19,11 +19,10 @@ class Settings(BaseSettings):
     
     # Redis & Celery
     REDIS_URL: str = "redis://localhost:6379/0"
-    CELERY_TASK_ALWAYS_EAGER: bool = True
+    CELERY_TASK_ALWAYS_EAGER: bool = False
     
-    # CrewAI / OpenAI LLM Config
-    OPENAI_API_KEY: str = "sk-placeholder-key-for-crewai-agent"
-    OPENAI_MODEL_NAME: str = "gpt-4o-mini"
+    # Google Gemini LLM Config
+    GEMINI_API_KEY: str = "placeholder-gemini-key"
     
     # Instagram Static Server Configuration
     PUBLIC_URL_PREFIX: str = "http://localhost:8000/static/uploads"
@@ -45,7 +44,7 @@ class Settings(BaseSettings):
     AWS_S3_REGION_NAME: Optional[str] = "us-east-1"
 
     class Config:
-        env_file = ".env"
+        env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env")
         env_file_encoding = "utf-8"
         extra = "ignore"
 

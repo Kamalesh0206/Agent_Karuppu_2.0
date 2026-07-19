@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.database import Base
 from app.config import settings
 # Import models to ensure they register on Base.metadata
-from app.models import User, InstagramAccount, PublishingLog, Log
+from app.models import User, InstagramAccount, Post, PublishingQueue, PublishingHistory, PublishingLog, AccessToken, RefreshToken, AuditLog
 
 config = context.config
 

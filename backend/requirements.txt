@@ -12,7 +12,5 @@ celery
 redis
 requests
 pyyaml
-crewai
-langchain-openai
 boto3
 alembic

@@ -1,7 +1,7 @@
 import subprocess
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 
 class GitSyncManager:

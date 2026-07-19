@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from .database import Base
@@ -18,13 +18,16 @@ class User(Base):
     mobile_verified = Column(Boolean, default=True, nullable=False)
     publishing_permission = Column(Boolean, default=True, nullable=False)
 
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
     accounts = relationship("InstagramAccount", back_populates="user", cascade="all, delete-orphan")
-    posts = relationship("PublishingLog", back_populates="user", cascade="all, delete-orphan")
-    logs = relationship("Log", back_populates="user")
+    groups = relationship("Group", back_populates="user", cascade="all, delete-orphan")
+    posts = relationship("Post", back_populates="user", cascade="all, delete-orphan")
+    audit_logs = relationship("AuditLog", back_populates="user")
+    access_tokens = relationship("AccessToken", back_populates="user", cascade="all, delete-orphan")
+    refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
 
 class InstagramAccount(Base):
     __tablename__ = "instagram_accounts"
@@ -39,46 +42,225 @@ class InstagramAccount(Base):
     page_access_token = Column(Text, nullable=False)  # Encrypted
     instagram_business_id = Column(String, unique=True, nullable=True)
     instagram_username = Column(String, nullable=True)
+    profile_picture = Column(Text, nullable=True)
+    business_name = Column(String, nullable=True)
+    followers_count = Column(Integer, default=0, nullable=False)
     token_expiry = Column(DateTime, nullable=True)
-    status = Column(String, default="ACTIVE", nullable=False)  # "ACTIVE", "INACTIVE", "LOCKED"
+    status = Column(String, default="Connected", nullable=False)  # "Connected", "Expired", "Publishing", "Disconnected", "Locked"
+    group_name = Column(String, default="Default", nullable=True)
+    group_id = Column(Integer, ForeignKey("groups.id", ondelete="SET NULL"), nullable=True)
     
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
     user = relationship("User", back_populates="accounts")
-    logs = relationship("PublishingLog", back_populates="account", cascade="all, delete-orphan")
+    group = relationship("Group", back_populates="accounts")
+    queue_items = relationship("PublishingQueue", back_populates="account", cascade="all, delete-orphan")
+    history_items = relationship("PublishingHistory", back_populates="account", cascade="all, delete-orphan")
+    synced_posts = relationship("SyncedPost", back_populates="account", cascade="all, delete-orphan")
+    following_relationships = relationship("FollowRelationship", foreign_keys="[FollowRelationship.follower_account_id]", back_populates="follower", cascade="all, delete-orphan")
+    followed_relationships = relationship("FollowRelationship", foreign_keys="[FollowRelationship.followed_account_id]", back_populates="followed", cascade="all, delete-orphan")
+    followers = relationship("Follower", back_populates="account", cascade="all, delete-orphan")
+    following = relationship("Following", back_populates="account", cascade="all, delete-orphan")
+    sync_histories = relationship("SyncHistory", back_populates="account", cascade="all, delete-orphan")
+
+class Post(Base):
+    __tablename__ = "posts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    caption = Column(Text, nullable=True)
+    media_url = Column(Text, nullable=False)
+    media_type = Column(String, nullable=False)  # "IMAGE", "REELS"
+    onedrive_share_url = Column(Text, nullable=True)
+    direct_download_url = Column(Text, nullable=True)
+    filename = Column(String, nullable=True)
+    mime_type = Column(String, nullable=True)
+    file_size = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", back_populates="posts")
+    queue_entries = relationship("PublishingQueue", back_populates="post", cascade="all, delete-orphan")
+    history_entries = relationship("PublishingHistory", back_populates="post", cascade="all, delete-orphan")
+
+class PublishingQueue(Base):
+    __tablename__ = "publishing_queue"
+
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(Integer, ForeignKey("posts.id", ondelete="CASCADE"), nullable=False)
+    account_id = Column(Integer, ForeignKey("instagram_accounts.id", ondelete="CASCADE"), nullable=False)
+    status = Column(String, default="Waiting", nullable=False)  # "Waiting", "Preparing", "Uploading", "Container Created", "Publishing", "Completed", "Retrying", "Failed", "Cancelled"
+    progress_percent = Column(Integer, default=0, nullable=False)
+    current_step = Column(String, nullable=True)
+    elapsed_time = Column(Integer, default=0, nullable=False)  # seconds
+    retry_count = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    post = relationship("Post", back_populates="queue_entries")
+    account = relationship("InstagramAccount", back_populates="queue_items")
+    publishing_logs = relationship("PublishingLog", back_populates="queue_item", cascade="all, delete-orphan")
+
+class PublishingHistory(Base):
+    __tablename__ = "publishing_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(Integer, ForeignKey("posts.id", ondelete="CASCADE"), nullable=False)
+    account_id = Column(Integer, ForeignKey("instagram_accounts.id", ondelete="CASCADE"), nullable=False)
+    media_id = Column(String, nullable=False)  # Published Post ID from Meta
+    published_time = Column(DateTime, default=datetime.utcnow)
+    caption = Column(Text, nullable=True)
+    media_url = Column(Text, nullable=True)
+    username = Column(String, nullable=False)
+
+    # Relationships
+    post = relationship("Post", back_populates="history_entries")
+    account = relationship("InstagramAccount", back_populates="history_items")
 
 class PublishingLog(Base):
     __tablename__ = "publishing_logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    account_id = Column(Integer, ForeignKey("instagram_accounts.id", ondelete="CASCADE"), nullable=False)
-    media_type = Column(String, nullable=False)  # "IMAGE", "VIDEO"
-    caption = Column(Text, nullable=True)
-    hashtags = Column(Text, nullable=True)
-    status = Column(String, default="Pending", nullable=False)  # "Pending", "Success", "Failed"
-    error_message = Column(Text, nullable=True)
-    post_id = Column(String, nullable=True)  # Instagram Media ID
-    published_at = Column(DateTime, default=datetime.datetime.utcnow)
-    
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    queue_id = Column(Integer, ForeignKey("publishing_queue.id", ondelete="CASCADE"), nullable=False)
+    http_status = Column(Integer, nullable=True)
+    meta_error_code = Column(String, nullable=True)
+    subcode = Column(String, nullable=True)
+    message = Column(Text, nullable=True)
+    fbtrace_id = Column(String, nullable=True)
+    request_url = Column(Text, nullable=True)
+    request_body = Column(Text, nullable=True)
+    response = Column(Text, nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    retry_count = Column(Integer, default=0, nullable=False)
 
     # Relationships
-    user = relationship("User", back_populates="posts")
-    account = relationship("InstagramAccount", back_populates="logs")
+    queue_item = relationship("PublishingQueue", back_populates="publishing_logs")
 
-class Log(Base):
-    __tablename__ = "logs"
+class AccessToken(Base):
+    __tablename__ = "access_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token = Column(Text, unique=True, index=True, nullable=False)
+    is_revoked = Column(Boolean, default=False, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="access_tokens")
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token = Column(Text, unique=True, index=True, nullable=False)
+    is_revoked = Column(Boolean, default=False, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="refresh_tokens")
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    action = Column(String, nullable=False)
+    action = Column(String, nullable=False)  # "Login", "Logout", "OAuth", "Publishing", "Token Refresh", "Failures", "Errors", "User Action"
     description = Column(Text, nullable=False)
     ip_address = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="audit_logs")
+
+class Group(Base):
+    __tablename__ = "groups"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    user = relationship("User", back_populates="groups")
+    accounts = relationship("InstagramAccount", back_populates="group")
+
+class SyncedPost(Base):
+    __tablename__ = "synced_posts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    instagram_account_id = Column(Integer, ForeignKey("instagram_accounts.id", ondelete="CASCADE"), nullable=False)
+    media_id = Column(String, unique=True, index=True, nullable=False)
+    permalink = Column(String, nullable=True)
+    media_url = Column(Text, nullable=True)
+    caption = Column(Text, nullable=True)
+    media_type = Column(String, nullable=True)  # IMAGE, VIDEO, CAROUSEL_ALBUM
+    like_count = Column(Integer, default=0)
+    comment_count = Column(Integer, default=0)
+    published_at = Column(DateTime, nullable=True)
+    synced_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    user = relationship("User", back_populates="logs")
+    account = relationship("InstagramAccount", back_populates="synced_posts")
+
+class FollowRelationship(Base):
+    __tablename__ = "follow_relationships"
+
+    id = Column(Integer, primary_key=True, index=True)
+    follower_account_id = Column(Integer, ForeignKey("instagram_accounts.id", ondelete="CASCADE"), nullable=False)
+    followed_account_id = Column(Integer, ForeignKey("instagram_accounts.id", ondelete="CASCADE"), nullable=False)
+    status = Column(String, default="Unknown", nullable=False)  # Following, Not Following, Unknown
+    last_checked = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    follower = relationship("InstagramAccount", foreign_keys=[follower_account_id], back_populates="following_relationships")
+    followed = relationship("InstagramAccount", foreign_keys=[followed_account_id], back_populates="followed_relationships")
+
+class Follower(Base):
+    __tablename__ = "followers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    instagram_account_id = Column(Integer, ForeignKey("instagram_accounts.id", ondelete="CASCADE"), nullable=False)
+    username = Column(String, nullable=False, index=True)
+    external_user_id = Column(String, nullable=True)
+    display_name = Column(String, nullable=True)
+    is_verified = Column(Boolean, default=False)
+    account_type = Column(String, nullable=True)
+    last_synced = Column(DateTime, default=datetime.utcnow)
+    source = Column(String, default="Mock API")
+
+    # Relationships
+    account = relationship("InstagramAccount", back_populates="followers")
+
+class Following(Base):
+    __tablename__ = "following"
+
+    id = Column(Integer, primary_key=True, index=True)
+    instagram_account_id = Column(Integer, ForeignKey("instagram_accounts.id", ondelete="CASCADE"), nullable=False)
+    username = Column(String, nullable=False, index=True)
+    external_user_id = Column(String, nullable=True)
+    display_name = Column(String, nullable=True)
+    is_verified = Column(Boolean, default=False)
+    account_type = Column(String, nullable=True)
+    last_synced = Column(DateTime, default=datetime.utcnow)
+    source = Column(String, default="Mock API")
+
+    # Relationships
+    account = relationship("InstagramAccount", back_populates="following")
+
+class SyncHistory(Base):
+    __tablename__ = "sync_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    instagram_account_id = Column(Integer, ForeignKey("instagram_accounts.id", ondelete="CASCADE"), nullable=False)
+    sync_type = Column(String, nullable=False)  # followers, following, both
+    status = Column(String, default="success")  # success, failed, unsupported
+    progress = Column(Integer, default=100)
+    message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    account = relationship("InstagramAccount", back_populates="sync_histories")

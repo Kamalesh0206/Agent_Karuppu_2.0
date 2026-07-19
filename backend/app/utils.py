@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime, timedelta
 import redis
 import json
 from .models import PublishingLog
@@ -35,7 +35,7 @@ def update_post_progress(db, post_id: int, status: str, percent: int, failure_re
         # But we update progress in memory or via Redis progress stream, and we update status & error_message in DB.
         if failure_reason is not None:
             post.error_message = failure_reason
-        post.updated_at = datetime.datetime.utcnow()
+        post.updated_at = datetime.utcnow()
         db.commit()
         db.refresh(post)
 
