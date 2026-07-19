@@ -266,9 +266,16 @@ class TokenUpdatePayload(BaseModel):
 class MediaResponse(BaseModel):
     media_id: int = Field(alias="id")
     filename: str
+    original_filename: Optional[str] = None
+    stored_filename: Optional[str] = None
     media_type: str
+    mime_type: Optional[str] = None
     file_size: int
+    bucket_name: Optional[str] = "Karuppu"
+    storage_path: Optional[str] = None
+    public_url: str
     storage_url: str
+    uploaded_by: Optional[str] = None
     uploaded_at: datetime
 
     class Config:

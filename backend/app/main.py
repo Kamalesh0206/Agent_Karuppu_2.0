@@ -34,6 +34,7 @@ from .celery_app import celery_app
 from .instagram import InstagramClient, InstagramAPIError
 from .gemini import GeminiClient
 from .s3 import upload_file_to_s3
+from .supabase_storage import upload_to_supabase_storage
 
 import logging
 logger = logging.getLogger("main_app")
@@ -2665,28 +2666,35 @@ async def upload_media_file(
         logger.warning(f"[Media Upload] File size {file_size} bytes exceeds limit for {type_str} ({limit_str})")
         raise HTTPException(status_code=400, detail=f"{type_str} size exceeds the limit of {limit_str}.")
         
-    # Write to local static folder
+    # Stream/Upload directly to Supabase Storage bucket 'Karuppu' (No local disk storage)
     try:
-        unique_name = f"{uuid.uuid4()}{ext}"
-        local_path = os.path.join(UPLOAD_DIR, unique_name)
-        with open(local_path, "wb") as f:
-            f.write(content)
+        supabase_res = upload_to_supabase_storage(
+            file_content=content,
+            original_filename=filename,
+            mime_type=mime or ("image/jpeg" if is_image else "video/mp4"),
+            is_image=is_image
+        )
     except Exception as e:
-        logger.error(f"[Media Upload] Failed to save file to disk at '{local_path}': {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Unable to save uploaded file to server storage.")
+        logger.error(f"[Media Upload] Supabase Storage upload error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Unable to upload to cloud storage: {str(e)}")
         
-    # Upload to S3 (attempts S3 upload, falls back to local static URL)
-    storage_url = upload_file_to_s3(local_path, unique_name)
-    
     media_type = "IMAGE" if is_image else "REELS"
+    public_url = supabase_res["public_url"]
     
-    # Save upload reference in db
+    # Save upload metadata reference in db
     try:
         media = MediaUpload(
             filename=filename,
+            original_filename=filename,
+            stored_filename=supabase_res["stored_filename"],
             media_type=media_type,
+            mime_type=mime or ("image/jpeg" if is_image else "video/mp4"),
             file_size=file_size,
-            storage_url=storage_url
+            bucket_name=supabase_res["bucket_name"],
+            storage_path=supabase_res["storage_path"],
+            public_url=public_url,
+            storage_url=public_url,
+            uploaded_by=current_user.username
         )
         db.add(media)
         db.commit()
@@ -2696,7 +2704,7 @@ async def upload_media_file(
         db.rollback()
         raise HTTPException(status_code=500, detail="Database transaction error while recording media upload.")
     
-    logger.info(f"[Media Upload] Successfully stored media #{media.id}: type={media_type}, url='{storage_url}', size={file_size} bytes")
+    logger.info(f"[Media Upload] Successfully uploaded to Supabase Storage #{media.id}: type={media_type}, path='{supabase_res['storage_path']}', url='{public_url}', size={file_size} bytes")
     return media
 
 @app.get("/media/{media_id}", response_model=MediaResponse)

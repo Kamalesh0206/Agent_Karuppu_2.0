@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     AWS_S3_ENDPOINT_URL: Optional[str] = ""
     AWS_S3_REGION_NAME: Optional[str] = "us-east-1"
 
+    # Supabase Storage Settings
+    SUPABASE_URL: str = "https://your-supabase-project.supabase.co"
+    SUPABASE_KEY: str = ""
+    SUPABASE_STORAGE_BUCKET: str = "Karuppu"
+
     class Config:
         env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env")
         env_file_encoding = "utf-8"

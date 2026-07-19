@@ -72,6 +72,7 @@ export default function Dashboard() {
   const [mediaSourceTab, setMediaSourceTab] = useState<'url' | 'upload'>('url');
   const [uploadingFile, setUploadingFile] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [selectedRawFile, setSelectedRawFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Real-time publishing and queue status
@@ -155,6 +156,7 @@ export default function Dashboard() {
   }, [caption, oneDriveUrl, mediaUrl, mediaType, validatedMetadata, linkVerified, mediaSourceTab]);
 
   const handleLocalFileUpload = async (file: File) => {
+    setSelectedRawFile(file);
     // Validate client-side first
     const filename = file.name;
     const ext = filename.split('.').pop()?.toLowerCase() || '';
@@ -236,16 +238,16 @@ export default function Dashboard() {
       
       const data = response!.data;
       setLinkVerified(true);
-      setMediaUrl(data.storage_url);
-      setOneDriveUrl(data.storage_url); // populate OneDrive URL state to prevent validator blocks
+      setMediaUrl(data.storage_url || data.public_url);
+      setOneDriveUrl(data.storage_url || data.public_url); // populate OneDrive URL state to prevent validator blocks
       setMediaType(data.media_type);
       setValidatedMetadata({
         filename: data.filename,
         mime_type: data.media_type === "IMAGE" ? "image/jpeg" : "video/mp4",
         size: data.file_size,
-        direct_download_url: data.storage_url
+        direct_download_url: data.storage_url || data.public_url
       });
-      setFormSuccess("Media file uploaded and verified successfully.");
+      setFormSuccess("Media file uploaded to Supabase Storage and verified successfully.");
     } catch (err: any) {
       console.error("[Local Media Upload Error]", err);
       setLinkVerified(false);
@@ -262,7 +264,7 @@ export default function Dashboard() {
       } else if (status === 422) {
         setFormError("Invalid upload payload structure (422). Please try another file.");
       } else if (status === 500) {
-        setFormError(detail || "Backend storage service error (500). Unable to save file.");
+        setFormError(detail || "Backend storage service error (500). Unable to save file to Supabase Storage.");
       } else {
         setFormError(detail || "Media file upload failed. Please check network connection and try again.");
       }
@@ -277,6 +279,7 @@ export default function Dashboard() {
     setOneDriveUrl('');
     setValidatedMetadata(null);
     setFormSuccess('');
+    setSelectedRawFile(null);
   };
 
   // WebSocket connection for real-time progress broadcast updates
@@ -556,8 +559,18 @@ export default function Dashboard() {
           </div>
         )}
         {formError && (
-          <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-semibold">
-            {formError}
+          <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-semibold flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <span>{formError}</span>
+            {selectedRawFile && mediaSourceTab === 'upload' && !uploadingFile && (
+              <button
+                type="button"
+                onClick={() => handleLocalFileUpload(selectedRawFile)}
+                className="px-3 py-1.5 bg-purple-500 hover:bg-purple-400 text-slate-950 font-black rounded-lg text-xs flex items-center gap-1.5 cursor-pointer shadow-md shrink-0"
+              >
+                <RefreshCw size={12} />
+                <span>Retry Upload</span>
+              </button>
+            )}
           </div>
         )}
 
@@ -824,7 +837,7 @@ export default function Dashboard() {
                     <div className="flex items-center justify-between text-xs font-bold">
                       <div className="flex items-center gap-2 text-purple-400">
                         <CheckCircle2 size={16} />
-                        <span>Device Upload Completed</span>
+                        <span>Uploaded to Supabase Cloud Storage</span>
                       </div>
                       <button
                         type="button"

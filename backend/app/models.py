@@ -292,7 +292,14 @@ class MediaUpload(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     filename = Column(String, nullable=False)
-    media_type = Column(String, nullable=False)
+    original_filename = Column(String, nullable=True)
+    stored_filename = Column(String, nullable=True)
+    media_type = Column(String, nullable=False)  # "IMAGE", "REELS"
+    mime_type = Column(String, nullable=True)
     file_size = Column(Integer, nullable=False)
-    storage_url = Column(String, nullable=False)
+    bucket_name = Column(String, default="Karuppu", nullable=True)
+    storage_path = Column(String, nullable=True)
+    public_url = Column(Text, nullable=True)
+    storage_url = Column(Text, nullable=False)
+    uploaded_by = Column(String, nullable=True)
     uploaded_at = Column(DateTime, default=datetime.utcnow)
