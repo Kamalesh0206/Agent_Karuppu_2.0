@@ -22,7 +22,8 @@ from .schemas import (
     Token, TokenData, InstagramAccountCreate, InstagramAccountUpdate, InstagramAccountResponse,
     PublishRequest, PostResponse, PublishingQueueResponse, PublishingHistoryResponse, PublishingLogResponse,
     AuditLogResponse, OptimizeRequest, OptimizeResponse, HashtagResponse, EmojiResponse, TranslateRequest, TranslateResponse, QualityScoreResponse,
-    ValidateLinkRequest, ValidateLinkResponse, GroupCreate, GroupUpdate, GroupResponse, TokenUpdatePayload
+    ValidateLinkRequest, ValidateLinkResponse, GroupCreate, GroupUpdate, GroupResponse, TokenUpdatePayload,
+    UserReject, UserResetPassword
 )
 from .security import (
     verify_password, get_password_hash, create_access_token, 
@@ -127,6 +128,33 @@ def startup_db_setup():
             print(f"Alter table group_id warning: {e}")
     finally:
         db_alter.close()
+
+    # Alter table users to add status columns
+    new_user_cols = [
+        ("approval_status", "VARCHAR(255) DEFAULT 'Pending'"),
+        ("approved_by", "INTEGER"),
+        ("approved_at", "TIMESTAMP"),
+        ("rejected_by", "INTEGER"),
+        ("rejected_at", "TIMESTAMP"),
+        ("rejection_reason", "VARCHAR(255)"),
+        ("disabled_at", "TIMESTAMP"),
+        ("suspended_at", "TIMESTAMP"),
+        ("last_login", "TIMESTAMP"),
+        ("is_active", "BOOLEAN DEFAULT 1")
+    ]
+    for col_name, col_type in new_user_cols:
+        db_alter = SessionLocal()
+        try:
+            db_alter.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_type};"))
+            db_alter.commit()
+        except Exception as e:
+            db_alter.rollback()
+            err_msg = str(e).lower()
+            if "duplicate column" not in err_msg and "already exists" not in err_msg:
+                print(f"Alter table users {col_name} warning: {e}")
+        finally:
+            db_alter.close()
+
     db = SessionLocal()
     try:
         super_admin_email = "agentkaruppuadmin@gmail.com"
@@ -140,6 +168,8 @@ def startup_db_setup():
                 password_hash=get_password_hash("admin123"),
                 role="Super Admin",
                 status="Approved",
+                approval_status="Approved",
+                is_active=True,
                 email_verified=True,
                 mobile_verified=True,
                 publishing_permission=True
@@ -270,18 +300,27 @@ def login(login_data: UserLogin, request: Request, db: Session = Depends(get_db)
     if user.status == "Pending Approval":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your account is pending approval."
+            detail="Your account is awaiting administrator approval."
         )
     elif user.status == "Rejected":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your registration request was rejected."
+            detail="Your registration has been rejected."
         )
-    elif user.status == "Deactivated":
+    elif user.status == "Disabled":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your account has been deactivated."
+            detail="Your account has been disabled."
         )
+    elif user.status == "Suspended":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account has been temporarily suspended."
+        )
+
+    # Capture last login
+    user.last_login = datetime.utcnow()
+    db.commit()
 
     access_token = create_access_token(data={"username": user.username, "role": user.role})
     
@@ -2091,3 +2130,312 @@ def get_sync_status(
         "message": history.message,
         "created_at": history.created_at.isoformat()
     }
+
+# --- Admin User Management Endpoints ---
+
+def get_admin_user(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role not in ["Super Admin", "Admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Admin privileges required."
+        )
+    return current_user
+
+@app.get("/admin/users", response_model=List[UserResponse])
+def get_admin_users(
+    search: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    role_filter: Optional[str] = None,
+    sort_by: Optional[str] = "created_at",
+    sort_dir: Optional[str] = "desc",
+    page: int = 1,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user)
+):
+    query = db.query(User)
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.filter(
+            (User.full_name.ilike(search_pattern)) |
+            (User.username.ilike(search_pattern)) |
+            (User.email.ilike(search_pattern)) |
+            (User.mobile_number.ilike(search_pattern))
+        )
+    if status_filter:
+        query = query.filter(User.status == status_filter)
+    if role_filter:
+        query = query.filter(User.role == role_filter)
+        
+    sort_col = getattr(User, sort_by or "created_at", User.created_at)
+    if sort_dir == "desc":
+        query = query.order_by(sort_col.desc())
+    else:
+        query = query.order_by(sort_col.asc())
+        
+    offset = (page - 1) * limit
+    return query.offset(offset).limit(limit).all()
+
+@app.get("/admin/users/stats")
+def get_admin_users_stats(
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user)
+):
+    total = db.query(User).count()
+    pending = db.query(User).filter(User.status == "Pending Approval").count()
+    approved = db.query(User).filter(User.status == "Approved").count()
+    disabled = db.query(User).filter(User.status == "Disabled").count()
+    suspended = db.query(User).filter(User.status == "Suspended").count()
+    admins = db.query(User).filter(User.role.in_(["Super Admin", "Admin"])).count()
+    return {
+        "total": total,
+        "pending": pending,
+        "approved": approved,
+        "disabled": disabled,
+        "suspended": suspended,
+        "admins": admins
+    }
+
+@app.get("/admin/users/{user_id}", response_model=UserResponse)
+def get_admin_user_details(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user)
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return user
+
+@app.put("/admin/users/{user_id}", response_model=UserResponse)
+def update_admin_user(
+    user_id: int,
+    user_data: UserUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user)
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    if user.id == admin_user.id:
+        if user_data.role and user_data.role != user.role:
+            raise HTTPException(status_code=400, detail="You cannot modify your own role.")
+        if user_data.status and user_data.status != user.status:
+            raise HTTPException(status_code=400, detail="You cannot modify your own status.")
+
+    if user_data.full_name is not None:
+        user.full_name = user_data.full_name
+    if user_data.email is not None:
+        user.email = user_data.email
+    if user_data.mobile_number is not None:
+        user.mobile_number = user_data.mobile_number
+    if user_data.role is not None:
+        user.role = user_data.role
+    if user_data.status is not None:
+        user.status = user_data.status
+    db.commit()
+    db.refresh(user)
+    
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    create_audit_log(
+        db=db,
+        action="User Action",
+        description=f"Admin {admin_user.username} updated user: {user.username}",
+        user_id=admin_user.id,
+        ip_address=client_ip
+    )
+    return user
+
+@app.post("/admin/users/{user_id}/approve", response_model=UserResponse)
+def approve_user(
+    user_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user)
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    user.status = "Approved"
+    user.approval_status = "Approved"
+    user.approved_by = admin_user.id
+    user.approved_at = datetime.utcnow()
+    user.rejected_by = None
+    user.rejected_at = None
+    user.rejection_reason = None
+    user.disabled_at = None
+    user.suspended_at = None
+    db.commit()
+    db.refresh(user)
+    
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    create_audit_log(
+        db=db,
+        action="User Action",
+        description=f"Admin {admin_user.username} approved user {user.username}",
+        user_id=admin_user.id,
+        ip_address=client_ip
+    )
+    return user
+
+@app.post("/admin/users/{user_id}/reject", response_model=UserResponse)
+def reject_user(
+    user_id: int,
+    reject_data: UserReject,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user)
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    user.status = "Rejected"
+    user.approval_status = "Rejected"
+    user.rejected_by = admin_user.id
+    user.rejected_at = datetime.utcnow()
+    user.rejection_reason = reject_data.rejection_reason
+    user.approved_by = None
+    user.approved_at = None
+    db.commit()
+    db.refresh(user)
+    
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    create_audit_log(
+        db=db,
+        action="User Action",
+        description=f"Admin {admin_user.username} rejected user {user.username} (Reason: {reject_data.rejection_reason})",
+        user_id=admin_user.id,
+        ip_address=client_ip
+    )
+    return user
+
+@app.post("/admin/users/{user_id}/disable", response_model=UserResponse)
+def disable_user(
+    user_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user)
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    if user.id == admin_user.id:
+        raise HTTPException(status_code=400, detail="You cannot disable your own account.")
+    user.status = "Disabled"
+    user.disabled_at = datetime.utcnow()
+    db.commit()
+    db.refresh(user)
+    
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    create_audit_log(
+        db=db,
+        action="User Action",
+        description=f"Admin {admin_user.username} disabled user {user.username}",
+        user_id=admin_user.id,
+        ip_address=client_ip
+    )
+    return user
+
+@app.post("/admin/users/{user_id}/enable", response_model=UserResponse)
+def enable_user(
+    user_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user)
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    user.status = "Approved"
+    user.disabled_at = None
+    user.suspended_at = None
+    db.commit()
+    db.refresh(user)
+    
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    create_audit_log(
+        db=db,
+        action="User Action",
+        description=f"Admin {admin_user.username} enabled user {user.username}",
+        user_id=admin_user.id,
+        ip_address=client_ip
+    )
+    return user
+
+@app.post("/admin/users/{user_id}/suspend", response_model=UserResponse)
+def suspend_user(
+    user_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user)
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    if user.id == admin_user.id:
+        raise HTTPException(status_code=400, detail="You cannot suspend your own account.")
+    user.status = "Suspended"
+    user.suspended_at = datetime.utcnow()
+    db.commit()
+    db.refresh(user)
+    
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    create_audit_log(
+        db=db,
+        action="User Action",
+        description=f"Admin {admin_user.username} suspended user {user.username}",
+        user_id=admin_user.id,
+        ip_address=client_ip
+    )
+    return user
+
+@app.delete("/admin/users/{user_id}")
+def delete_user(
+    user_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user)
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    if user.id == admin_user.id:
+        raise HTTPException(status_code=400, detail="You cannot delete your own account.")
+    username = user.username
+    db.delete(user)
+    db.commit()
+    
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    create_audit_log(
+        db=db,
+        action="User Action",
+        description=f"Admin {admin_user.username} deleted user {username}",
+        user_id=admin_user.id,
+        ip_address=client_ip
+    )
+    return {"message": "User deleted successfully."}
+
+@app.post("/admin/users/{user_id}/reset-password")
+def reset_user_password(
+    user_id: int,
+    reset_data: UserResetPassword,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user)
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    user.password_hash = get_password_hash(reset_data.new_password)
+    db.commit()
+    
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    create_audit_log(
+        db=db,
+        action="User Action",
+        description=f"Admin {admin_user.username} reset password for user {user.username}",
+        user_id=admin_user.id,
+        ip_address=client_ip
+    )
+    return {"message": "Password reset successfully."}

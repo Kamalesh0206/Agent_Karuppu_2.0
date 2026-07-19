@@ -13,7 +13,18 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
     role = Column(String, default="User", nullable=False)  # "Super Admin", "User"
-    status = Column(String, default="Pending Approval", nullable=False)  # "Pending Approval", "Approved", "Rejected", "Deactivated"
+    status = Column(String, default="Pending Approval", nullable=False)  # "Pending Approval", "Approved", "Rejected", "Disabled", "Suspended"
+    approval_status = Column(String, default="Pending", nullable=False)  # "Pending", "Approved", "Rejected"
+    approved_by = Column(Integer, nullable=True)
+    approved_at = Column(DateTime, nullable=True)
+    rejected_by = Column(Integer, nullable=True)
+    rejected_at = Column(DateTime, nullable=True)
+    rejection_reason = Column(String, nullable=True)
+    disabled_at = Column(DateTime, nullable=True)
+    suspended_at = Column(DateTime, nullable=True)
+    last_login = Column(DateTime, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+
     email_verified = Column(Boolean, default=True, nullable=False)
     mobile_verified = Column(Boolean, default=True, nullable=False)
     publishing_permission = Column(Boolean, default=True, nullable=False)

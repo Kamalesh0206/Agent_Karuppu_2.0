@@ -22,6 +22,16 @@ class UserResponse(BaseModel):
     username: str
     role: str
     status: str
+    approval_status: str
+    approved_by: Optional[int] = None
+    approved_at: Optional[datetime] = None
+    rejected_by: Optional[int] = None
+    rejected_at: Optional[datetime] = None
+    rejection_reason: Optional[str] = None
+    disabled_at: Optional[datetime] = None
+    suspended_at: Optional[datetime] = None
+    last_login: Optional[datetime] = None
+    is_active: bool
     email_verified: bool
     mobile_verified: bool
     publishing_permission: bool
@@ -35,6 +45,14 @@ class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     email: Optional[str] = None
     mobile_number: Optional[str] = None
+    role: Optional[str] = None
+    status: Optional[str] = None
+
+class UserReject(BaseModel):
+    rejection_reason: Optional[str] = None
+
+class UserResetPassword(BaseModel):
+    new_password: str
 
 class ChangePasswordRequest(BaseModel):
     old_password: str

@@ -29,6 +29,7 @@ import PublishingHistory from './pages/History';
 import Logs from './pages/Logs';
 import Settings from './pages/Settings';
 import Tokens from './pages/Tokens';
+import UserManagement from './pages/UserManagement';
 
 const queryClient = new QueryClient();
 
@@ -47,6 +48,7 @@ const DashboardLayout = () => {
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const username = localStorage.getItem("username") || "User";
+  const role = localStorage.getItem("role") || "User";
 
   const handleLogout = () => {
     localStorage.clear();
@@ -60,6 +62,11 @@ const DashboardLayout = () => {
     { text: 'Audit Logs', icon: <FileText size={18} />, path: '/logs' },
     { text: 'Settings', icon: <SettingsIcon size={18} />, path: '/settings' },
   ];
+
+  const isAdmin = role === "Super Admin" || role === "Admin";
+  const finalMenuItems = isAdmin 
+    ? [...menuItems, { text: 'User Management', icon: <Users size={18} />, path: '/admin/users' }]
+    : menuItems;
 
   const sidebarContent = (
     <div className="h-full flex flex-col justify-between bg-slate-950 border-r border-slate-800 p-4">
@@ -75,7 +82,7 @@ const DashboardLayout = () => {
 
         {/* Navigation Items */}
         <nav className="space-y-1.5">
-          {menuItems.map((item) => {
+          {finalMenuItems.map((item) => {
             const active = location.pathname === item.path;
             return (
               <Link
@@ -179,6 +186,7 @@ const DashboardLayout = () => {
           <Route path="/history" element={<PublishingHistory />} />
           <Route path="/logs" element={<Logs />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/admin/users" element={isAdmin ? <UserManagement /> : <Navigate to="/" replace />} />
         </Routes>
       </main>
     </div>
