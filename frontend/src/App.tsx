@@ -64,11 +64,11 @@ const DashboardLayout = () => {
     <div className="h-full flex flex-col justify-between bg-slate-950 border-r border-slate-800 p-4">
       <div>
         {/* Brand Header */}
-        <div className="flex items-center gap-3 px-2 py-4 mb-6">
+        <div className="flex flex-col items-center text-center px-2 py-4 mb-6 border-b border-slate-900 pb-6">
           <img 
             src="/logo.jpg" 
             alt="Agent Logo" 
-            className="w-10 h-10 rounded-xl object-cover border border-purple-500/20 shadow-md shadow-purple-500/10"
+            className="w-48 h-48 rounded-2xl object-cover border border-purple-500/20 shadow-lg shadow-purple-500/10 mb-4"
           />
           <div>
             <h1 className="text-xl font-black font-outfit gradient-text tracking-wide">AgentKaruppu</h1>

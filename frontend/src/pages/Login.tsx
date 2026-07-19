@@ -64,7 +64,7 @@ export default function Login() {
           <img 
             src="/logo.jpg" 
             alt="Agent Logo" 
-            className="w-16 h-16 rounded-2xl mx-auto mb-4 shadow-lg shadow-purple-500/20 object-cover border border-purple-500/20"
+            className="w-48 h-48 rounded-2xl mx-auto mb-4 shadow-lg shadow-purple-500/20 object-cover border border-purple-500/20"
           />
           <h2 className="text-3xl font-black font-outfit text-slate-100 mb-2">Welcome Back</h2>
           <p className="text-sm text-slate-400">Sign in to your AgentKaruppu publishing console</p>
