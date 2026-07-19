@@ -162,6 +162,13 @@ export default function Dashboard() {
     const isImage = ['jpg', 'jpeg', 'png', 'webp'].includes(ext);
     const isVideo = ['mp4', 'mov'].includes(ext);
     
+    console.log("[Local Media Upload] File selected:", {
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      extension: ext
+    });
+
     if (!isImage && !isVideo) {
       setFormError("Unsupported file type. Please upload JPG, JPEG, PNG, WEBP images or MP4, MOV videos.");
       return;
@@ -186,20 +193,48 @@ export default function Dashboard() {
       const formData = new FormData();
       formData.append("file", file);
       
-      const response = await axios.post(`${API_URL}/media/upload`, formData, {
-        headers: { 
-          'Content-Type': 'multipart/form-data',
-          Authorization: `Bearer ${localStorage.getItem("token")}`
-        },
-        onUploadProgress: (progressEvent) => {
-          if (progressEvent.total) {
-            const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-            setUploadProgress(percent);
+      const targetEndpoints = [
+        `${API_URL}/media/upload`,
+        `${API_URL}/api/media/upload`
+      ];
+
+      let response = null;
+      let lastErr = null;
+
+      for (const endpoint of targetEndpoints) {
+        try {
+          console.log(`[Local Media Upload] Attempting POST to: ${endpoint}`);
+          response = await axios.post(endpoint, formData, {
+            headers: { 
+              'Content-Type': 'multipart/form-data',
+              Authorization: `Bearer ${localStorage.getItem("token")}`
+            },
+            onUploadProgress: (progressEvent) => {
+              if (progressEvent.total) {
+                const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+                setUploadProgress(percent);
+              }
+            }
+          });
+          if (response && response.status === 200) {
+            console.log(`[Local Media Upload] Request succeeded via ${endpoint}`, response.data);
+            break;
           }
+        } catch (e: any) {
+          lastErr = e;
+          if (e.response?.status === 404) {
+            console.warn(`[Local Media Upload] Endpoint ${endpoint} returned 404, attempting fallback route...`);
+            continue;
+          }
+          throw e;
         }
-      });
+      }
+
+      if (!response && lastErr) {
+        throw lastErr;
+      }
       
-      const data = response.data;
+      const data = response!.data;
       setLinkVerified(true);
       setMediaUrl(data.storage_url);
       setOneDriveUrl(data.storage_url); // populate OneDrive URL state to prevent validator blocks
@@ -212,8 +247,25 @@ export default function Dashboard() {
       });
       setFormSuccess("Media file uploaded and verified successfully.");
     } catch (err: any) {
+      console.error("[Local Media Upload Error]", err);
       setLinkVerified(false);
-      setFormError(err.response?.data?.detail || "Media file upload failed. Please try again.");
+      
+      const status = err.response?.status;
+      const detail = err.response?.data?.detail;
+
+      if (status === 404 || detail === "Not Found") {
+        setFormError("Upload endpoint not found on backend (404). Please verify backend server service is active.");
+      } else if (status === 401) {
+        setFormError("Authentication session expired. Please log in again.");
+      } else if (status === 403) {
+        setFormError("You do not have permission to upload media files.");
+      } else if (status === 422) {
+        setFormError("Invalid upload payload structure (422). Please try another file.");
+      } else if (status === 500) {
+        setFormError(detail || "Backend storage service error (500). Unable to save file.");
+      } else {
+        setFormError(detail || "Media file upload failed. Please check network connection and try again.");
+      }
     } finally {
       setUploadingFile(false);
     }

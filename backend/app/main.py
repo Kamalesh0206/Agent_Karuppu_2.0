@@ -2623,44 +2623,57 @@ def transfer_account_ownership(
 
 # --- Media Upload REST APIs ---
 
+@app.post("/media/upload", response_model=MediaResponse)
 @app.post("/api/media/upload", response_model=MediaResponse)
 async def upload_media_file(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Validate MIME type and extensions
-    mime = file.content_type or ""
     filename = file.filename or "unnamed_media"
+    mime = file.content_type or ""
+    logger.info(f"[Media Upload] Incoming upload request: filename='{filename}', mime='{mime}', user='{current_user.username}'")
+    
     ext = os.path.splitext(filename)[1].lower()
     
     # Restrict executable or dangerous extensions
-    if ext in [".exe", ".bat", ".sh", ".py", ".js", ".html", ".htm", ".php", ".pl", ".cgi"]:
+    if ext in [".exe", ".bat", ".sh", ".py", ".js", ".html", ".htm", ".php", ".pl", ".cgi", ".cmd", ".vbs"]:
+        logger.warning(f"[Media Upload] Rejected forbidden extension '{ext}' from user {current_user.username}")
         raise HTTPException(status_code=400, detail="Forbidden file extension type.")
         
     is_image = "image" in mime or ext in [".jpg", ".jpeg", ".png", ".webp"]
     is_video = "video" in mime or ext in [".mp4", ".mov"]
     
     if not is_image and not is_video:
+        logger.warning(f"[Media Upload] Rejected unsupported format '{mime}' ({ext})")
         raise HTTPException(status_code=400, detail="Unsupported media format. Please upload JPG, JPEG, PNG, WEBP images or MP4, MOV videos.")
         
     # Read file and validate size
-    content = await file.read()
-    file_size = len(content)
-    await file.seek(0)
+    try:
+        content = await file.read()
+        file_size = len(content)
+        await file.seek(0)
+    except Exception as e:
+        logger.error(f"[Media Upload] Failed to read uploaded file payload: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Unable to read uploaded file payload.")
     
     # 10MB limit for images, 100MB for videos
     max_size = 10 * 1024 * 1024 if is_image else 100 * 1024 * 1024
     if file_size > max_size:
         type_str = "Image" if is_image else "Video"
         limit_str = "10MB" if is_image else "100MB"
+        logger.warning(f"[Media Upload] File size {file_size} bytes exceeds limit for {type_str} ({limit_str})")
         raise HTTPException(status_code=400, detail=f"{type_str} size exceeds the limit of {limit_str}.")
         
     # Write to local static folder
-    unique_name = f"{uuid.uuid4()}{ext}"
-    local_path = os.path.join(UPLOAD_DIR, unique_name)
-    with open(local_path, "wb") as f:
-        f.write(content)
+    try:
+        unique_name = f"{uuid.uuid4()}{ext}"
+        local_path = os.path.join(UPLOAD_DIR, unique_name)
+        with open(local_path, "wb") as f:
+            f.write(content)
+    except Exception as e:
+        logger.error(f"[Media Upload] Failed to save file to disk at '{local_path}': {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Unable to save uploaded file to server storage.")
         
     # Upload to S3 (attempts S3 upload, falls back to local static URL)
     storage_url = upload_file_to_s3(local_path, unique_name)
@@ -2668,18 +2681,25 @@ async def upload_media_file(
     media_type = "IMAGE" if is_image else "REELS"
     
     # Save upload reference in db
-    media = MediaUpload(
-        filename=filename,
-        media_type=media_type,
-        file_size=file_size,
-        storage_url=storage_url
-    )
-    db.add(media)
-    db.commit()
-    db.refresh(media)
+    try:
+        media = MediaUpload(
+            filename=filename,
+            media_type=media_type,
+            file_size=file_size,
+            storage_url=storage_url
+        )
+        db.add(media)
+        db.commit()
+        db.refresh(media)
+    except Exception as e:
+        logger.error(f"[Media Upload] Database transaction error: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Database transaction error while recording media upload.")
     
+    logger.info(f"[Media Upload] Successfully stored media #{media.id}: type={media_type}, url='{storage_url}', size={file_size} bytes")
     return media
 
+@app.get("/media/{media_id}", response_model=MediaResponse)
 @app.get("/api/media/{media_id}", response_model=MediaResponse)
 def get_media_details(
     media_id: int,
@@ -2691,6 +2711,7 @@ def get_media_details(
         raise HTTPException(status_code=404, detail="Media resource not found.")
     return media
 
+@app.delete("/media/{media_id}")
 @app.delete("/api/media/{media_id}")
 def delete_media_file(
     media_id: int,
@@ -2708,7 +2729,7 @@ def delete_media_file(
         if os.path.exists(local_path):
             os.remove(local_path)
     except Exception as e:
-        print(f"Error removing local file: {e}")
+        logger.error(f"Error removing local file: {e}")
         
     db.delete(media)
     db.commit()
