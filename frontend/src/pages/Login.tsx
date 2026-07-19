@@ -61,9 +61,11 @@ export default function Login() {
         <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-pink-500/10 rounded-full blur-3xl" />
 
         <div className="text-center mb-8 relative">
-          <div className="w-12 h-12 rounded-2xl gradient-btn flex items-center justify-center mx-auto mb-4 shadow-lg shadow-purple-500/25">
-            <span className="font-black text-slate-950 text-2xl font-outfit">A</span>
-          </div>
+          <img 
+            src="/logo.jpg" 
+            alt="Agent Logo" 
+            className="w-16 h-16 rounded-2xl mx-auto mb-4 shadow-lg shadow-purple-500/20 object-cover border border-purple-500/20"
+          />
           <h2 className="text-3xl font-black font-outfit text-slate-100 mb-2">Welcome Back</h2>
           <p className="text-sm text-slate-400">Sign in to your AgentKaruppu publishing console</p>
         </div>

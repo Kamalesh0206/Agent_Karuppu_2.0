@@ -65,9 +65,11 @@ const DashboardLayout = () => {
       <div>
         {/* Brand Header */}
         <div className="flex items-center gap-3 px-2 py-4 mb-6">
-          <div className="w-10 h-10 rounded-xl gradient-btn flex items-center justify-center shadow-lg shadow-purple-500/20">
-            <span className="font-extrabold text-slate-950 text-xl font-outfit">A</span>
-          </div>
+          <img 
+            src="/logo.jpg" 
+            alt="Agent Logo" 
+            className="w-10 h-10 rounded-xl object-cover border border-purple-500/20 shadow-md shadow-purple-500/10"
+          />
           <div>
             <h1 className="text-xl font-black font-outfit gradient-text tracking-wide">AgentKaruppu</h1>
             <span className="text-[10px] text-slate-400 font-mono tracking-widest uppercase">SaaS Publisher</span>
