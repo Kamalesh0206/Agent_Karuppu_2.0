@@ -38,7 +38,7 @@ export default function Login() {
         setHealthResult(`Response received: ${JSON.stringify(res.data)}`);
       }
     } catch (e: any) {
-      setHealthResult(`❌ Connection Failed: ${e.message || 'Server Unreachable'}. Check URL or CORS.`);
+      setHealthResult(`❌ Connection Failed: ${e.message || 'Server Unreachable'}. Please check backend URL and server status.`);
     } finally {
       setHealthTesting(false);
     }
@@ -90,6 +90,7 @@ export default function Login() {
         msg = "Account pending administrator approval or deactivated.";
       } else if (status === 404) {
         msg = `Authentication endpoint not found at ${API_URL}/login (404).`;
+        setShowApiConfig(true);
       } else if (status === 500) {
         msg = "Backend server or database error (500). Please contact administrator.";
       } else if (!err.response) {
@@ -139,11 +140,12 @@ export default function Login() {
         )}
 
         {showApiConfig && (
-          <div className="mb-6 p-4 rounded-2xl bg-slate-950/80 border border-purple-500/30 space-y-3 relative">
+          <div className="mb-6 p-4 rounded-2xl bg-slate-950/90 border border-purple-500/30 space-y-3 relative shadow-2xl">
             <div className="flex items-center justify-between text-xs font-bold text-slate-300">
-              <span>Backend API Server URL</span>
+              <span>Backend API Server Target</span>
               <span className="text-[10px] text-purple-400 font-mono">Current: {API_URL}</span>
             </div>
+            <p className="text-[11px] text-slate-400">Enter your live backend URL (e.g. Render, Ngrok, or Local IP) to connect from mobile:</p>
             <div className="flex gap-2">
               <input
                 type="text"
@@ -208,7 +210,17 @@ export default function Login() {
           </button>
         </form>
 
-        <div className="mt-8 text-center text-sm text-slate-400 relative">
+        <div className="mt-6 text-center">
+          <button
+            type="button"
+            onClick={() => setShowApiConfig(!showApiConfig)}
+            className="text-xs text-slate-500 hover:text-purple-400 font-semibold cursor-pointer transition-colors"
+          >
+            ⚙ Change/Configure Target Backend API URL
+          </button>
+        </div>
+
+        <div className="mt-6 text-center text-sm text-slate-400 relative">
           <span>Don't have an account? </span>
           <Link to="/signup" className="text-purple-400 font-bold hover:underline">Sign Up</Link>
         </div>

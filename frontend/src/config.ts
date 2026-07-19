@@ -22,8 +22,7 @@ export const getApiUrl = (): string => {
     // 4. Production Hostname Check (Netlify / Custom Web)
     const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
     if (hostname.includes('netlify.app') || hostname.includes('agentkaruppu')) {
-      // Use origin or standard HTTPS production target
-      return `${protocol}//${hostname}`;
+      return `${protocol}//${window.location.host}`;
     }
 
     return `${protocol}//${hostname}:8000`;
