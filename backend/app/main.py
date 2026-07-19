@@ -566,7 +566,41 @@ def get_accounts(db: Session = Depends(get_db), current_user: User = Depends(get
         except Exception:
             pass
     db.commit()
-    return accounts
+
+    is_admin = current_user.role in ["Super Admin", "Admin"]
+    
+    results = []
+    for acc in accounts:
+        is_owner = acc.owner_id == current_user.id
+        acc_dict = {
+            "id": acc.id,
+            "user_id": acc.user_id,
+            "instagram_username": acc.instagram_username,
+            "profile_picture": acc.profile_picture,
+            "business_name": acc.business_name,
+            "followers_count": acc.followers_count,
+            "status": acc.status,
+            "group_id": acc.group_id,
+            "group_name": acc.group.name if acc.group else None,
+            "owner_id": acc.owner_id,
+            "owner_name": acc.owner_name or (acc.user.full_name if acc.user else "System"),
+            "linked_by": acc.linked_by,
+            "linked_at": acc.linked_at,
+            "created_at": acc.created_at,
+            "updated_at": acc.updated_at,
+            # Sensitive fields sanitized for non-owners/non-admins
+            "facebook_page_id": acc.facebook_page_id if (is_admin or is_owner) else None,
+            "facebook_page_name": acc.facebook_page_name if (is_admin or is_owner) else None,
+            "instagram_business_id": acc.instagram_business_id if (is_admin or is_owner) else None,
+            "token_expiry": acc.token_expiry if (is_admin or is_owner) else None,
+            "created_by": acc.created_by if (is_admin or is_owner) else None,
+            "updated_by": acc.updated_by if (is_admin or is_owner) else None,
+            "last_modified_by": acc.last_modified_by if (is_admin or is_owner) else None,
+            "last_modified_at": acc.last_modified_at if (is_admin or is_owner) else None,
+        }
+        results.append(acc_dict)
+
+    return results
 
 @app.post("/accounts/connect", response_model=InstagramAccountResponse)
 def connect_account_manually(
