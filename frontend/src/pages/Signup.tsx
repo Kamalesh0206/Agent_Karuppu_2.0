@@ -27,6 +27,7 @@ export default function Signup() {
     setLoading(true);
 
     try {
+      console.log(`[Auth Registration] Initiating POST request to ${API_URL}/signup`, { username, fullName, email, mobileNumber });
       await axios.post(`${API_URL}/signup`, {
         full_name: fullName,
         email: email || null,
@@ -35,10 +36,34 @@ export default function Signup() {
         password
       });
 
+      console.log("[Auth Registration] Registration successful.");
       setSuccess(true);
       setTimeout(() => navigate('/login'), 4000);
     } catch (err: any) {
-      const msg = err.response?.data?.detail || "Failed to sign up. Please try again.";
+      console.error("[Auth Registration Error] Detailed diagnostic info:", {
+        url: `${API_URL}/signup`,
+        status: err.response?.status,
+        data: err.response?.data,
+        message: err.message,
+        code: err.code
+      });
+
+      let msg = "Failed to sign up. Please try again.";
+      const status = err.response?.status;
+      const detail = err.response?.data?.detail;
+
+      if (detail) {
+        msg = detail;
+      } else if (status === 400) {
+        msg = "Validation failed. Username, email, or mobile number already exists or is invalid.";
+      } else if (status === 404) {
+        msg = `Registration endpoint not found at ${API_URL}/signup (404).`;
+      } else if (status === 500) {
+        msg = "Backend database error during registration (500). Please contact administrator.";
+      } else if (!err.response) {
+        msg = `Network Connection Error (${err.message || 'Server Unreachable'}). Unable to reach backend API at ${API_URL}. Please check internet connection or server CORS settings.`;
+      }
+
       setError(msg);
     } finally {
       setLoading(false);

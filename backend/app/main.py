@@ -279,9 +279,36 @@ def get_super_admin(current_user: User = Depends(get_current_user)) -> User:
         )
     return current_user
 
+# --- Health & Version Endpoints ---
+
+@app.get("/health")
+def health_check(db: Session = Depends(get_db)):
+    db_status = "connected"
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception as e:
+        db_status = f"disconnected: {str(e)}"
+
+    return {
+        "status": "healthy" if db_status == "connected" else "unhealthy",
+        "database": db_status,
+        "version": "4.0.0",
+        "environment": "production"
+    }
+
+@app.get("/api/version")
+def api_version():
+    return {
+        "version": "4.0.0",
+        "name": settings.PROJECT_NAME,
+        "status": "active"
+    }
+
 # --- Authentication Routes ---
 
 @app.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@app.post("/auth/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@app.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def signup(user_data: UserCreate, request: Request, db: Session = Depends(get_db)):
     email_val = user_data.email.strip() if user_data.email and user_data.email.strip() else None
     mobile_val = user_data.mobile_number.strip() if user_data.mobile_number and user_data.mobile_number.strip() else None
@@ -320,6 +347,7 @@ def signup(user_data: UserCreate, request: Request, db: Session = Depends(get_db
     return new_user
 
 @app.post("/login", response_model=Token)
+@app.post("/auth/login", response_model=Token)
 def login(login_data: UserLogin, request: Request, db: Session = Depends(get_db)):
     user = db.query(User).filter(
         (User.username == login_data.username) | 

@@ -23,11 +23,13 @@ export default function Login() {
     setLoading(true);
 
     try {
+      console.log(`[Auth Login] Initiating POST request to ${API_URL}/login`, { username });
       const response = await axios.post(`${API_URL}/login`, {
         username,
         password
       });
 
+      console.log("[Auth Login] Login successful:", response.data);
       const { access_token, role, status } = response.data;
       localStorage.setItem("token", access_token);
       localStorage.setItem("username", username);
@@ -36,13 +38,32 @@ export default function Login() {
 
       navigate("/");
     } catch (err: any) {
-      console.error("Login failure:", err);
+      console.error("[Auth Login Error] Detailed diagnostic info:", {
+        url: `${API_URL}/login`,
+        status: err.response?.status,
+        data: err.response?.data,
+        message: err.message,
+        code: err.code
+      });
+
       let msg = "Failed to log in. Please try again.";
-      if (err.response?.data?.detail) {
-        msg = err.response.data.detail;
-      } else if (err.message) {
-        msg = `${err.message}. Please verify the API endpoint is active and CORS is configured.`;
+      const status = err.response?.status;
+      const detail = err.response?.data?.detail;
+
+      if (detail) {
+        msg = detail;
+      } else if (status === 401) {
+        msg = "Invalid credentials. Please verify your username and password.";
+      } else if (status === 403) {
+        msg = "Account pending administrator approval or deactivated.";
+      } else if (status === 404) {
+        msg = `Authentication endpoint not found at ${API_URL}/login (404).`;
+      } else if (status === 500) {
+        msg = "Backend server or database error (500). Please contact administrator.";
+      } else if (!err.response) {
+        msg = `Network Connection Error (${err.message || 'Server Unreachable'}). Unable to reach backend API at ${API_URL}. Please check internet connection or server CORS settings.`;
       }
+
       setError(msg);
     } finally {
       setLoading(false);
