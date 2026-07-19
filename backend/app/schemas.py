@@ -97,11 +97,25 @@ class InstagramAccountResponse(BaseModel):
     status: str
     group_name: Optional[str] = None
     group_id: Optional[int] = None
+    
+    # Ownership fields
+    owner_id: Optional[int] = None
+    owner_name: Optional[str] = None
+    linked_by: Optional[str] = None
+    linked_at: Optional[datetime] = None
+    created_by: Optional[str] = None
+    updated_by: Optional[str] = None
+    last_modified_by: Optional[str] = None
+    last_modified_at: Optional[datetime] = None
+
     created_at: datetime
     updated_at: datetime
 
     class Config:
         from_attributes = True
+
+class TransferOwnerPayload(BaseModel):
+    new_owner_id: int
 
 # Post Schemas
 class PostCreate(BaseModel):

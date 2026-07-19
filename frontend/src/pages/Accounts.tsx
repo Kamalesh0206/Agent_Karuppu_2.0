@@ -25,6 +25,10 @@ interface InstagramAccount {
   status: string;
   group_id: number | null;
   group_name: string | null;
+  owner_id: number | null;
+  owner_name: string | null;
+  linked_by: string | null;
+  linked_at: string | null;
 }
 
 interface Group {
@@ -61,6 +65,12 @@ export default function Accounts() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  
+  // RBAC User profile context
+  const [userProfile, setUserProfile] = useState<{ id: number, role: string, username: string } | null>(null);
+  const [transferOwnerAccId, setTransferOwnerAccId] = useState<number | null>(null);
+  const [systemUsers, setSystemUsers] = useState<{ id: number, full_name: string, username: string }[]>([]);
+  const [newOwnerId, setNewOwnerId] = useState<number | null>(null);
   
   // Accordion status
   const [expandedGroupId, setExpandedGroupId] = useState<number | null>(null);
@@ -143,6 +153,17 @@ export default function Accounts() {
     return `${formatted} (${diffDays} days left)`;
   };
 
+  const fetchProfile = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/profile`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
+      });
+      setUserProfile(response.data);
+    } catch (err) {
+      console.error("Profile fetch error:", err);
+    }
+  };
+
   useEffect(() => {
     fetchInitialData();
   }, []);
@@ -152,6 +173,7 @@ export default function Accounts() {
     setError('');
     try {
       await Promise.all([
+        fetchProfile(),
         fetchGroups(),
         fetchAccounts(),
         fetchHistoryLogs()
@@ -185,6 +207,91 @@ export default function Accounts() {
       setHistoryItems(response.data);
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const getOwnershipBadge = (acc: InstagramAccount) => {
+    if (!userProfile) return null;
+    const isAdmin = userProfile.role === "Super Admin" || userProfile.role === "Admin";
+    const isOwner = acc.owner_id === userProfile.id;
+
+    if (isAdmin) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-400 text-[10px] font-bold">
+          👑 Admin
+        </span>
+      );
+    } else if (isOwner) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-[10px] font-bold">
+          ⭐ Owner
+        </span>
+      );
+    } else {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-400 text-[10px] font-bold">
+          👤 Shared
+        </span>
+      );
+    }
+  };
+
+  const checkPermission = (acc: InstagramAccount) => {
+    if (!userProfile) return false;
+    if (userProfile.role === "Super Admin" || userProfile.role === "Admin") return true;
+    if (acc.owner_id === userProfile.id) return true;
+    return false;
+  };
+
+  const checkGroupTokenTabPermission = (group: Group) => {
+    if (!userProfile) return false;
+    if (userProfile.role === "Super Admin" || userProfile.role === "Admin") return true;
+    // True if user owns at least one account in this group
+    const groupAccounts = accounts.filter(acc => acc.group_id === group.id);
+    return groupAccounts.some(acc => acc.owner_id === userProfile.id);
+  };
+
+  const checkGroupSettingsPermission = (group: Group) => {
+    if (!userProfile) return false;
+    if (userProfile.role === "Super Admin" || userProfile.role === "Admin") return true;
+    if (group.user_id === userProfile.id) return true;
+    return false;
+  };
+
+  const handleOpenTransferOwner = async (accId: number) => {
+    setTransferOwnerAccId(accId);
+    try {
+      const res = await axios.get(`${API_URL}/admin/users`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
+      });
+      setSystemUsers(res.data);
+      if (res.data.length > 0) {
+        setNewOwnerId(res.data[0].id);
+      }
+    } catch (err) {
+      console.error("Error loading users for transfer:", err);
+    }
+  };
+
+  const handleTransferSubmit = async () => {
+    if (!transferOwnerAccId || !newOwnerId) return;
+    try {
+      setError('');
+      setSuccessMsg('');
+      await axios.post(`${API_URL}/accounts/${transferOwnerAccId}/transfer-owner`, {
+        new_owner_id: newOwnerId
+      }, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
+      });
+      setSuccessMsg("Ownership transferred successfully.");
+      setTransferOwnerAccId(null);
+      await fetchAccounts();
+    } catch (err: any) {
+      if (err.response?.status === 403) {
+        setError("Only the account owner or an administrator can modify this Instagram account.");
+      } else {
+        setError(err.response?.data?.detail || "Transfer ownership failed.");
+      }
     }
   };
 
@@ -688,15 +795,17 @@ export default function Accounts() {
                     </div>
 
                     {/* Actions */}
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => { setRenameGroupId(group.id); setRenameValue(group.name); }}
-                        className="p-1.5 hover:bg-slate-900 rounded-lg text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
-                        title="Rename Group"
-                      >
-                        <Edit3 size={14} />
-                      </button>
-                    </div>
+                    {checkGroupSettingsPermission(group) && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => { setRenameGroupId(group.id); setRenameValue(group.name); }}
+                          className="p-1.5 hover:bg-slate-900 rounded-lg text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+                          title="Rename Group"
+                        >
+                          <Edit3 size={14} />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -712,13 +821,15 @@ export default function Accounts() {
                       {/* Sub-Header Area: Link Instagram button directly inside the expanded card */}
                       <div className="p-5 border-b border-slate-900/60 bg-purple-500/[0.01] flex items-center justify-between">
                         <span className="text-xs font-semibold text-slate-400">Workspace Integration Panel</span>
-                        <button
-                          onClick={() => handleOpenLinkDialog(group.id)}
-                          className="px-4 py-2 border border-purple-500/20 hover:border-purple-500/40 bg-purple-500/5 hover:bg-purple-500/10 text-purple-400 hover:text-purple-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md"
-                        >
-                          <LinkIcon size={12} />
-                          <span>Link Instagram Profile</span>
-                        </button>
+                        {checkGroupSettingsPermission(group) && (
+                          <button
+                            onClick={() => handleOpenLinkDialog(group.id)}
+                            className="px-4 py-2 border border-purple-500/20 hover:border-purple-500/40 bg-purple-500/5 hover:bg-purple-500/10 text-purple-400 hover:text-purple-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md"
+                          >
+                            <LinkIcon size={12} />
+                            <span>Link Instagram Profile</span>
+                          </button>
+                        )}
                       </div>
 
                       {/* Tab Selectors */}
@@ -732,24 +843,28 @@ export default function Accounts() {
                           <List size={12} />
                           <span>Accounts</span>
                         </button>
-                        <button
-                          onClick={() => setActiveTabMap(prev => ({ ...prev, [group.id]: 'token' }))}
-                          className={`px-4 py-3 border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
-                            activeTab === 'token' ? 'border-purple-500 text-purple-400 bg-slate-900/10' : 'border-transparent hover:text-slate-300'
-                          }`}
-                        >
-                          <Key size={12} />
-                          <span>Access Token</span>
-                        </button>
-                        <button
-                          onClick={() => setActiveTabMap(prev => ({ ...prev, [group.id]: 'settings' }))}
-                          className={`px-4 py-3 border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
-                            activeTab === 'settings' ? 'border-purple-500 text-purple-400 bg-slate-900/10' : 'border-transparent hover:text-slate-300'
-                          }`}
-                        >
-                          <SettingsIcon size={12} />
-                          <span>Settings</span>
-                        </button>
+                        {checkGroupTokenTabPermission(group) && (
+                          <button
+                            onClick={() => setActiveTabMap(prev => ({ ...prev, [group.id]: 'token' }))}
+                            className={`px-4 py-3 border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
+                              activeTab === 'token' ? 'border-purple-500 text-purple-400 bg-slate-900/10' : 'border-transparent hover:text-slate-300'
+                            }`}
+                          >
+                            <Key size={12} />
+                            <span>Access Token</span>
+                          </button>
+                        )}
+                        {checkGroupSettingsPermission(group) && (
+                          <button
+                            onClick={() => setActiveTabMap(prev => ({ ...prev, [group.id]: 'settings' }))}
+                            className={`px-4 py-3 border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
+                              activeTab === 'settings' ? 'border-purple-500 text-purple-400 bg-slate-900/10' : 'border-transparent hover:text-slate-300'
+                            }`}
+                          >
+                            <SettingsIcon size={12} />
+                            <span>Settings</span>
+                          </button>
+                        )}
                         <button
                           onClick={() => setActiveTabMap(prev => ({ ...prev, [group.id]: 'logs' }))}
                           className={`px-4 py-3 border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
@@ -785,31 +900,61 @@ export default function Accounts() {
                                     <div className="flex items-center gap-3">
                                       <img src={acc.profile_picture || "https://placekitten.com/200/200"} className="w-10 h-10 rounded-full object-cover border border-purple-500/25" alt="Profile" />
                                       <div>
-                                        <h4 className="text-sm font-bold text-slate-200 leading-tight">@{acc.instagram_username}</h4>
+                                        <h4 className="text-sm font-bold text-slate-200 leading-tight flex items-center gap-2">
+                                          <span>@{acc.instagram_username}</span>
+                                          {getOwnershipBadge(acc)}
+                                        </h4>
                                         <span className="text-[10px] text-slate-500">{acc.business_name || 'Instagram Profile'}</span>
                                       </div>
                                     </div>
                                     
-                                    <div className="flex gap-1.5">
-                                      <button
-                                        onClick={() => handleOpenEditDialog(acc)}
-                                        className="p-1.5 hover:bg-slate-900 text-purple-400 rounded-md transition-colors cursor-pointer"
-                                        title="Edit Credentials"
-                                      >
-                                        <Key size={12} />
-                                      </button>
-                                      <button
-                                        onClick={() => setDeleteId(acc.id)}
-                                        className="p-1.5 hover:bg-slate-900 text-red-400 rounded-md transition-colors cursor-pointer"
-                                        title="Disconnect profile"
-                                      >
-                                        <Trash2 size={12} />
-                                      </button>
-                                    </div>
+                                    {checkPermission(acc) && (
+                                      <div className="flex gap-1.5">
+                                        <button
+                                          onClick={() => handleOpenEditDialog(acc)}
+                                          className="p-1.5 hover:bg-slate-900 text-purple-400 rounded-md transition-colors cursor-pointer"
+                                          title="Edit Credentials"
+                                        >
+                                          <Key size={12} />
+                                        </button>
+                                        <button
+                                          onClick={() => setDeleteId(acc.id)}
+                                          className="p-1.5 hover:bg-slate-900 text-red-400 rounded-md transition-colors cursor-pointer"
+                                          title="Disconnect profile"
+                                        >
+                                          <Trash2 size={12} />
+                                        </button>
+                                      </div>
+                                    )}
                                   </div>
 
                                   {/* Info details */}
                                   <div className="text-[11px] space-y-1 pt-2 border-t border-slate-900">
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-slate-500">Owner Name:</span>
+                                      <span className="text-slate-300 font-semibold flex items-center gap-1">
+                                        <span>{acc.owner_name || 'N/A'}</span>
+                                        {(userProfile?.role === "Super Admin" || userProfile?.role === "Admin") && (
+                                          <button
+                                            onClick={() => handleOpenTransferOwner(acc.id)}
+                                            className="p-0.5 hover:bg-slate-800 text-purple-400 rounded"
+                                            title="Transfer Ownership"
+                                          >
+                                            <Edit3 size={10} />
+                                          </button>
+                                        )}
+                                      </span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-slate-500">Linked By:</span>
+                                      <span className="text-slate-300 font-semibold">{acc.linked_by || 'N/A'}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-slate-500">Linked Date:</span>
+                                      <span className="text-slate-400 font-mono text-[10px]">
+                                        {acc.linked_at ? new Date(acc.linked_at).toLocaleDateString() : 'N/A'}
+                                      </span>
+                                    </div>
                                     <div className="flex justify-between">
                                       <span className="text-slate-500">Facebook Page:</span>
                                       <span className="text-slate-400 font-mono">{acc.facebook_page_name || 'N/A'}</span>
@@ -835,21 +980,23 @@ export default function Accounts() {
                                   </div>
 
                                   {/* Move options selector */}
-                                  <div className="pt-2 border-t border-slate-900 flex items-center justify-between">
-                                    <span className="text-[10px] text-slate-500 font-semibold uppercase flex items-center gap-1">
-                                      <Move size={10} />
-                                      <span>Move to group</span>
-                                    </span>
-                                    <select
-                                      value={acc.group_id || ''}
-                                      onChange={(e) => handleMoveAccount(acc.id, Number(e.target.value))}
-                                      className="text-[10px] bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5 outline-none text-slate-300 font-bold"
-                                    >
-                                      {groups.map(g => (
-                                        <option key={g.id} value={g.id}>{g.name}</option>
-                                      ))}
-                                    </select>
-                                  </div>
+                                  {checkPermission(acc) && (
+                                    <div className="pt-2 border-t border-slate-900 flex items-center justify-between">
+                                      <span className="text-[10px] text-slate-500 font-semibold uppercase flex items-center gap-1">
+                                        <Move size={10} />
+                                        <span>Move to group</span>
+                                      </span>
+                                      <select
+                                        value={acc.group_id || ''}
+                                        onChange={(e) => handleMoveAccount(acc.id, Number(e.target.value))}
+                                        className="text-[10px] bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5 outline-none text-slate-300 font-bold"
+                                      >
+                                        {groups.map(g => (
+                                          <option key={g.id} value={g.id}>{g.name}</option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                  )}
                                 </div>
                               ))
                             )}
@@ -1370,6 +1517,60 @@ export default function Accounts() {
               </div>
               <div className="p-6 overflow-y-auto flex-1">
                 <FollowManagement onClose={() => setShowFollowModal(false)} />
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Transfer Ownership Modal */}
+      <AnimatePresence>
+        {transferOwnerAccId !== null && (
+          <div className="fixed inset-0 flex items-center justify-center z-50 p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setTransferOwnerAccId(null)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="glass-panel w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl relative overflow-hidden flex flex-col z-10"
+            >
+              <div className="px-6 py-4 border-b border-slate-900">
+                <h3 className="text-lg font-bold font-outfit text-slate-100">Transfer Profile Ownership</h3>
+              </div>
+              <div className="p-6 space-y-4">
+                <p className="text-xs text-slate-400">Select the new designated owner for this linked Instagram account from the list below:</p>
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Select User</label>
+                  <select
+                    value={newOwnerId || ''}
+                    onChange={(e) => setNewOwnerId(Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 text-xs text-slate-200 rounded-xl outline-none focus:border-purple-500/50 cursor-pointer"
+                  >
+                    {systemUsers.map(u => (
+                      <option key={u.id} value={u.id}>{u.full_name} (@{u.username})</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="px-6 py-4 bg-slate-900/40 border-t border-slate-900 flex justify-end gap-2">
+                <button
+                  onClick={() => setTransferOwnerAccId(null)}
+                  className="px-4 py-2 border border-slate-800 hover:bg-slate-900 text-slate-300 font-semibold rounded-xl text-xs transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleTransferSubmit}
+                  className="px-5 py-2 bg-purple-500 text-slate-950 font-black rounded-xl text-xs transition-all cursor-pointer shadow-md hover:shadow-lg"
+                >
+                  Transfer Owner
+                </button>
               </div>
             </motion.div>
           </div>

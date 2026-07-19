@@ -23,7 +23,7 @@ from .schemas import (
     PublishRequest, PostResponse, PublishingQueueResponse, PublishingHistoryResponse, PublishingLogResponse,
     AuditLogResponse, OptimizeRequest, OptimizeResponse, HashtagResponse, EmojiResponse, TranslateRequest, TranslateResponse, QualityScoreResponse,
     ValidateLinkRequest, ValidateLinkResponse, GroupCreate, GroupUpdate, GroupResponse, TokenUpdatePayload,
-    UserReject, UserResetPassword
+    UserReject, UserResetPassword, TransferOwnerPayload
 )
 from .security import (
     verify_password, get_password_hash, create_access_token, 
@@ -126,6 +126,49 @@ def startup_db_setup():
         err_msg = str(e).lower()
         if "duplicate column" not in err_msg and "already exists" not in err_msg:
             print(f"Alter table group_id warning: {e}")
+    finally:
+        db_alter.close()
+
+    # Alter table instagram_accounts to add ownership columns
+    new_acc_cols = [
+        ("owner_id", "INTEGER"),
+        ("owner_name", "VARCHAR(255)"),
+        ("linked_by", "VARCHAR(255)"),
+        ("linked_at", "TIMESTAMP"),
+        ("created_by", "VARCHAR(255)"),
+        ("updated_by", "VARCHAR(255)"),
+        ("last_modified_by", "VARCHAR(255)"),
+        ("last_modified_at", "TIMESTAMP")
+    ]
+    for col_name, col_type in new_acc_cols:
+        db_alter = SessionLocal()
+        try:
+            db_alter.execute(text(f"ALTER TABLE instagram_accounts ADD COLUMN {col_name} {col_type};"))
+            db_alter.commit()
+        except Exception as e:
+            db_alter.rollback()
+            err_msg = str(e).lower()
+            if "duplicate column" not in err_msg and "already exists" not in err_msg:
+                print(f"Alter table instagram_accounts {col_name} warning: {e}")
+        finally:
+            db_alter.close()
+
+    # Backfill ownership fields for existing profiles
+    db_alter = SessionLocal()
+    try:
+        db_alter.execute(text("""
+            UPDATE instagram_accounts 
+            SET 
+                owner_id = user_id, 
+                linked_by = (SELECT username FROM users WHERE users.id = instagram_accounts.user_id), 
+                owner_name = (SELECT full_name FROM users WHERE users.id = instagram_accounts.user_id), 
+                created_by = (SELECT username FROM users WHERE users.id = instagram_accounts.user_id) 
+            WHERE owner_id IS NULL;
+        """))
+        db_alter.commit()
+    except Exception as e:
+        db_alter.rollback()
+        print(f"Migrate ownership error: {e}")
     finally:
         db_alter.close()
 
@@ -496,12 +539,22 @@ def oauth_callback(code: str, request: Request, db: Session = Depends(get_db)):
     except Exception as e:
         return RedirectResponse(f"http://localhost:3000/accounts?status=error&message={str(e)}")
 
+def check_account_modification_permission(account: InstagramAccount, user: User):
+    if user.role in ["Super Admin", "Admin"]:
+        return
+    if account.owner_id == user.id:
+        return
+    raise HTTPException(
+        status_code=403,
+        detail="Only the account owner or an administrator can modify this Instagram account."
+    )
+
 # --- Accounts CRUD Routes ---
 
 @app.get("/accounts", response_model=List[InstagramAccountResponse])
 def get_accounts(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     # Synchronize profiles followers counts on loading accounts
-    accounts = db.query(InstagramAccount).filter(InstagramAccount.user_id == current_user.id).all()
+    accounts = db.query(InstagramAccount).all()
     for acc in accounts:
         try:
             token = decrypt_token(acc.page_access_token)
@@ -548,7 +601,12 @@ def connect_account_manually(
         business_name=result.get("business_name") or "Manual Business",
         followers_count=result.get("followers_count", 0),
         token_expiry=result["token_expiry_time"],
-        status="Connected"
+        status="Connected",
+        # Ownership fields
+        owner_id=current_user.id,
+        owner_name=current_user.full_name,
+        linked_by=current_user.username,
+        created_by=current_user.username
     )
     db.add(new_acc)
     db.commit()
@@ -557,7 +615,7 @@ def connect_account_manually(
     create_audit_log(
         db=db,
         action="User Action",
-        description=f"User {current_user.username} manually connected Instagram Profile @{new_acc.instagram_username}",
+        description=f"{current_user.username} linked @{new_acc.instagram_username}",
         user_id=current_user.id,
         ip_address=client_ip
     )
@@ -574,8 +632,9 @@ def update_account_credentials(
     acc = db.query(InstagramAccount).filter(InstagramAccount.id == id).first()
     if not acc:
         raise HTTPException(status_code=404, detail="Instagram profile not found.")
-    if acc.user_id != current_user.id and current_user.role != "Super Admin":
-        raise HTTPException(status_code=403, detail="Forbidden: You do not own this profile.")
+    
+    # Permission verification
+    check_account_modification_permission(acc, current_user)
 
     client_ip = request.client.host if request.client else "127.0.0.1"
 
@@ -607,10 +666,16 @@ def update_account_credentials(
     db.commit()
     db.refresh(acc)
 
+    is_admin = current_user.role in ["Super Admin", "Admin"]
+    action_desc = f"Admin updated token for @{acc.instagram_username}" if is_admin else f"Owner refreshed access token for @{acc.instagram_username}"
+    acc.last_modified_by = current_user.username
+    acc.last_modified_at = datetime.utcnow()
+    db.commit()
+
     create_audit_log(
         db=db,
         action="User Action",
-        description=f"User {current_user.username} updated credentials for Instagram Profile @{acc.instagram_username}",
+        description=action_desc,
         user_id=current_user.id,
         ip_address=client_ip
     )
@@ -621,18 +686,22 @@ def delete_account(id: int, request: Request, db: Session = Depends(get_db), cur
     acc = db.query(InstagramAccount).filter(InstagramAccount.id == id).first()
     if not acc:
         raise HTTPException(status_code=404, detail="Instagram profile not found.")
-    if acc.user_id != current_user.id and current_user.role != "Super Admin":
-        raise HTTPException(status_code=403, detail="Forbidden: You do not own this profile.")
+    
+    # Permission verification
+    check_account_modification_permission(acc, current_user)
 
     username = acc.instagram_username
     db.delete(acc)
     db.commit()
 
     client_ip = request.client.host if request.client else "127.0.0.1"
+    is_admin = current_user.role in ["Super Admin", "Admin"]
+    del_desc = f"Admin deleted @{username}" if is_admin else f"Owner deleted @{username}"
+    
     create_audit_log(
         db=db,
         action="User Action",
-        description=f"User {current_user.username} disconnected Instagram Profile @{username}",
+        description=del_desc,
         user_id=current_user.id,
         ip_address=client_ip
     )
@@ -670,9 +739,13 @@ def link_instagram_to_group(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    group = db.query(Group).filter(Group.id == group_id, Group.user_id == current_user.id).first()
+    group = db.query(Group).filter(Group.id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail="Target Group not found.")
+    
+    # Check group modification permissions
+    if current_user.role not in ["Super Admin", "Admin"] and group.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the group owner or an administrator can modify this Group.")
         
     biz_id = payload.instagram_business_id
     username = payload.instagram_username
@@ -700,12 +773,17 @@ def link_instagram_to_group(
     ).first()
     
     if existing:
+        # Check permissions on target account
+        check_account_modification_permission(existing, current_user)
+
         if existing.group_id == group_id:
             existing.page_access_token = encrypt_token(payload.access_token)
             existing.followers_count = followers or existing.followers_count
             existing.profile_picture = profile_pic or existing.profile_picture
             existing.status = "Connected"
             existing.token_expiry = datetime.utcnow() + timedelta(days=60)
+            existing.last_modified_by = current_user.username
+            existing.last_modified_at = datetime.utcnow()
             db.commit()
             db.refresh(existing)
             return existing
@@ -729,6 +807,8 @@ def link_instagram_to_group(
         existing.profile_picture = profile_pic or existing.profile_picture
         existing.status = "Connected"
         existing.token_expiry = datetime.utcnow() + timedelta(days=60)
+        existing.last_modified_by = current_user.username
+        existing.last_modified_at = datetime.utcnow()
         db.commit()
         db.refresh(existing)
         return existing
@@ -747,17 +827,30 @@ def link_instagram_to_group(
         business_name=page_name or "IG Business",
         followers_count=followers or 0,
         token_expiry=datetime.utcnow() + timedelta(days=60),
-        status="Connected"
+        status="Connected",
+        # Ownership fields
+        owner_id=current_user.id,
+        owner_name=current_user.full_name,
+        linked_by=current_user.username,
+        created_by=current_user.username
     )
     db.add(new_acc)
     db.commit()
     db.refresh(new_acc)
+    
+    # Audit log
+    create_audit_log(
+        db=db,
+        action="User Action",
+        description=f"{current_user.username} linked @{new_acc.instagram_username}",
+        user_id=current_user.id
+    )
     return new_acc
 
 @app.get("/groups", response_model=List[GroupResponse])
 def get_groups(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    # Load all user groups
-    user_groups = db.query(Group).filter(Group.user_id == current_user.id).all()
+    # Load all groups (shared globally)
+    user_groups = db.query(Group).all()
     
     # Auto-seed Default group if none exist
     if not user_groups:
@@ -769,13 +862,13 @@ def get_groups(db: Session = Depends(get_db), current_user: User = Depends(get_c
         
     # Map all unassigned accounts to the first group
     unassigned_accounts = db.query(InstagramAccount).filter(
-        InstagramAccount.user_id == current_user.id,
         InstagramAccount.group_id == None
     ).all()
     if unassigned_accounts:
         target_group = user_groups[0]
         for acc in unassigned_accounts:
             acc.group_id = target_group.id
+            acc.group_name = target_group.name
         db.commit()
         
     # Build responses with account counts
@@ -809,10 +902,19 @@ def create_group(group_data: GroupCreate, db: Session = Depends(get_db), current
 
 @app.put("/groups/{id}", response_model=GroupResponse)
 def update_group(id: int, group_data: GroupUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    group = db.query(Group).filter(Group.id == id, Group.user_id == current_user.id).first()
+    group = db.query(Group).filter(Group.id == id).first()
     if not group:
         raise HTTPException(status_code=404, detail="Group not found.")
+        
+    # Check permissions
+    if current_user.role not in ["Super Admin", "Admin"] and group.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the group owner or an administrator can modify this Group.")
+        
     group.name = group_data.name
+    # Update associated accounts' group name
+    db.query(InstagramAccount).filter(InstagramAccount.group_id == group.id).update(
+        {InstagramAccount.group_name: group_data.name}
+    )
     db.commit()
     db.refresh(group)
     count = db.query(InstagramAccount).filter(InstagramAccount.group_id == group.id).count()
@@ -827,9 +929,13 @@ def update_group(id: int, group_data: GroupUpdate, db: Session = Depends(get_db)
 
 @app.delete("/groups/{id}")
 def delete_group(id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    group = db.query(Group).filter(Group.id == id, Group.user_id == current_user.id).first()
+    group = db.query(Group).filter(Group.id == id).first()
     if not group:
         raise HTTPException(status_code=404, detail="Group not found.")
+        
+    # Check permissions
+    if current_user.role not in ["Super Admin", "Admin"] and group.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the group owner or an administrator can modify this Group.")
     
     # Verify group is empty
     count = db.query(InstagramAccount).filter(InstagramAccount.group_id == group.id).count()
@@ -842,12 +948,15 @@ def delete_group(id: int, db: Session = Depends(get_db), current_user: User = De
 
 @app.post("/accounts/{id}/move", response_model=InstagramAccountResponse)
 def move_account_to_group(id: int, payload: MoveAccountRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    acc = db.query(InstagramAccount).filter(InstagramAccount.id == id, InstagramAccount.user_id == current_user.id).first()
+    acc = db.query(InstagramAccount).filter(InstagramAccount.id == id).first()
     if not acc:
         raise HTTPException(status_code=404, detail="Instagram profile not found.")
         
+    # Permission verification
+    check_account_modification_permission(acc, current_user)
+        
     if payload.group_id:
-        target_group = db.query(Group).filter(Group.id == payload.group_id, Group.user_id == current_user.id).first()
+        target_group = db.query(Group).filter(Group.id == payload.group_id).first()
         if not target_group:
             raise HTTPException(status_code=404, detail="Target Group not found.")
         acc.group_id = target_group.id
@@ -856,6 +965,8 @@ def move_account_to_group(id: int, payload: MoveAccountRequest, db: Session = De
         acc.group_id = None
         acc.group_name = None
         
+    acc.last_modified_by = current_user.username
+    acc.last_modified_at = datetime.utcnow()
     db.commit()
     db.refresh(acc)
     return acc
@@ -863,7 +974,6 @@ def move_account_to_group(id: int, payload: MoveAccountRequest, db: Session = De
 @app.get("/groups/{group_id}/accounts", response_model=List[InstagramAccountResponse])
 def get_group_accounts(group_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     return db.query(InstagramAccount).filter(
-        InstagramAccount.user_id == current_user.id,
         InstagramAccount.group_id == group_id
     ).all()
 
@@ -2439,3 +2549,40 @@ def reset_user_password(
         ip_address=client_ip
     )
     return {"message": "Password reset successfully."}
+
+@app.post("/accounts/{id}/transfer-owner", response_model=InstagramAccountResponse)
+def transfer_account_ownership(
+    id: int,
+    payload: TransferOwnerPayload,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    acc = db.query(InstagramAccount).filter(InstagramAccount.id == id).first()
+    if not acc:
+        raise HTTPException(status_code=404, detail="Instagram profile not found.")
+        
+    if current_user.role not in ["Super Admin", "Admin"]:
+        raise HTTPException(status_code=403, detail="Only an administrator can transfer account ownership.")
+        
+    new_owner = db.query(User).filter(User.id == payload.new_owner_id).first()
+    if not new_owner:
+        raise HTTPException(status_code=404, detail="New owner user not found.")
+        
+    old_owner_name = acc.owner_name or "N/A"
+    acc.owner_id = new_owner.id
+    acc.owner_name = new_owner.full_name
+    acc.last_modified_by = current_user.username
+    acc.last_modified_at = datetime.utcnow()
+    db.commit()
+    db.refresh(acc)
+    
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    create_audit_log(
+        db=db,
+        action="User Action",
+        description=f"Admin {current_user.username} transferred ownership of @{acc.instagram_username} from {old_owner_name} to {new_owner.username}",
+        user_id=current_user.id,
+        ip_address=client_ip
+    )
+    return acc

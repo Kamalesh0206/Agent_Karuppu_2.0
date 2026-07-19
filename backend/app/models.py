@@ -33,7 +33,7 @@ class User(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    accounts = relationship("InstagramAccount", back_populates="user", cascade="all, delete-orphan")
+    accounts = relationship("InstagramAccount", back_populates="user", cascade="all, delete-orphan", foreign_keys="[InstagramAccount.user_id]")
     groups = relationship("Group", back_populates="user", cascade="all, delete-orphan")
     posts = relationship("Post", back_populates="user", cascade="all, delete-orphan")
     audit_logs = relationship("AuditLog", back_populates="user")
@@ -60,12 +60,23 @@ class InstagramAccount(Base):
     status = Column(String, default="Connected", nullable=False)  # "Connected", "Expired", "Publishing", "Disconnected", "Locked"
     group_name = Column(String, default="Default", nullable=True)
     group_id = Column(Integer, ForeignKey("groups.id", ondelete="SET NULL"), nullable=True)
+
+    # Ownership Metadata
+    owner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    owner_name = Column(String, nullable=True)
+    linked_by = Column(String, nullable=True)
+    linked_at = Column(DateTime, default=datetime.utcnow)
+    created_by = Column(String, nullable=True)
+    updated_by = Column(String, nullable=True)
+    last_modified_by = Column(String, nullable=True)
+    last_modified_at = Column(DateTime, nullable=True)
     
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    user = relationship("User", back_populates="accounts")
+    user = relationship("User", back_populates="accounts", foreign_keys=[user_id])
+    owner = relationship("User", foreign_keys=[owner_id])
     group = relationship("Group", back_populates="accounts")
     queue_items = relationship("PublishingQueue", back_populates="account", cascade="all, delete-orphan")
     history_items = relationship("PublishingHistory", back_populates="account", cascade="all, delete-orphan")
