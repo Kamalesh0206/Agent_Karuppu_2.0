@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # User Schemas
 class UserLogin(BaseModel):
@@ -262,3 +262,15 @@ class TokenUpdatePayload(BaseModel):
     access_token: str
     validate_token: bool = True
     account_ids: Optional[List[int]] = None
+
+class MediaResponse(BaseModel):
+    media_id: int = Field(alias="id")
+    filename: str
+    media_type: str
+    file_size: int
+    storage_url: str
+    uploaded_at: datetime
+
+    class Config:
+        from_attributes = True
+        populate_by_name = True

@@ -286,3 +286,13 @@ class SyncHistory(Base):
 
     # Relationships
     account = relationship("InstagramAccount", back_populates="sync_histories")
+
+class MediaUpload(Base):
+    __tablename__ = "media_uploads"
+
+    id = Column(Integer, primary_key=True, index=True)
+    filename = Column(String, nullable=False)
+    media_type = Column(String, nullable=False)
+    file_size = Column(Integer, nullable=False)
+    storage_url = Column(String, nullable=False)
+    uploaded_at = Column(DateTime, default=datetime.utcnow)

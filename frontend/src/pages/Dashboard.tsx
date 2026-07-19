@@ -67,6 +67,12 @@ export default function Dashboard() {
 
   const [mediaUrl, setMediaUrl] = useState('');
   const [mediaType, setMediaType] = useState<'IMAGE' | 'REELS'>('IMAGE');
+
+  // Media source tabs & uploading states
+  const [mediaSourceTab, setMediaSourceTab] = useState<'url' | 'upload'>('url');
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Real-time publishing and queue status
   const [activeQueue, setActiveQueue] = useState<QueueItem[]>([]);
@@ -113,6 +119,112 @@ export default function Dashboard() {
     } catch (err) {
       console.error("Failed to fetch status: ", err);
     }
+  };
+
+  // Load draft from localStorage on mount
+  useEffect(() => {
+    const savedDraft = localStorage.getItem("campaign_draft");
+    if (savedDraft) {
+      try {
+        const draft = JSON.parse(savedDraft);
+        if (draft.caption) setCaption(draft.caption);
+        if (draft.oneDriveUrl) setOneDriveUrl(draft.oneDriveUrl);
+        if (draft.mediaUrl) setMediaUrl(draft.mediaUrl);
+        if (draft.mediaType) setMediaType(draft.mediaType);
+        if (draft.validatedMetadata) setValidatedMetadata(draft.validatedMetadata);
+        if (draft.linkVerified) setLinkVerified(draft.linkVerified);
+        if (draft.mediaSourceTab) setMediaSourceTab(draft.mediaSourceTab);
+      } catch (e) {
+        console.error("Failed to parse campaign draft: ", e);
+      }
+    }
+  }, []);
+
+  // Save draft on state updates
+  useEffect(() => {
+    const draft = {
+      caption,
+      oneDriveUrl,
+      mediaUrl,
+      mediaType,
+      validatedMetadata,
+      linkVerified,
+      mediaSourceTab
+    };
+    localStorage.setItem("campaign_draft", JSON.stringify(draft));
+  }, [caption, oneDriveUrl, mediaUrl, mediaType, validatedMetadata, linkVerified, mediaSourceTab]);
+
+  const handleLocalFileUpload = async (file: File) => {
+    // Validate client-side first
+    const filename = file.name;
+    const ext = filename.split('.').pop()?.toLowerCase() || '';
+    
+    const isImage = ['jpg', 'jpeg', 'png', 'webp'].includes(ext);
+    const isVideo = ['mp4', 'mov'].includes(ext);
+    
+    if (!isImage && !isVideo) {
+      setFormError("Unsupported file type. Please upload JPG, JPEG, PNG, WEBP images or MP4, MOV videos.");
+      return;
+    }
+    
+    const maxSize = isImage ? 10 * 1024 * 1024 : 100 * 1024 * 1024;
+    if (file.size > maxSize) {
+      const typeStr = isImage ? "Image" : "Video";
+      const limitStr = isImage ? "10MB" : "100MB";
+      setFormError(`${typeStr} size exceeds the limit of ${limitStr}.`);
+      return;
+    }
+    
+    setUploadingFile(true);
+    setUploadProgress(0);
+    setFormError('');
+    setFormSuccess('');
+    setLinkVerified(false);
+    setValidatedMetadata(null);
+    
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      
+      const response = await axios.post(`${API_URL}/media/upload`, formData, {
+        headers: { 
+          'Content-Type': 'multipart/form-data',
+          Authorization: `Bearer ${localStorage.getItem("token")}`
+        },
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total) {
+            const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setUploadProgress(percent);
+          }
+        }
+      });
+      
+      const data = response.data;
+      setLinkVerified(true);
+      setMediaUrl(data.storage_url);
+      setOneDriveUrl(data.storage_url); // populate OneDrive URL state to prevent validator blocks
+      setMediaType(data.media_type);
+      setValidatedMetadata({
+        filename: data.filename,
+        mime_type: data.media_type === "IMAGE" ? "image/jpeg" : "video/mp4",
+        size: data.file_size,
+        direct_download_url: data.storage_url
+      });
+      setFormSuccess("Media file uploaded and verified successfully.");
+    } catch (err: any) {
+      setLinkVerified(false);
+      setFormError(err.response?.data?.detail || "Media file upload failed. Please try again.");
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
+  const handleRemoveUploadedFile = () => {
+    setLinkVerified(false);
+    setMediaUrl('');
+    setOneDriveUrl('');
+    setValidatedMetadata(null);
+    setFormSuccess('');
   };
 
   // WebSocket connection for real-time progress broadcast updates
@@ -226,6 +338,7 @@ export default function Dashboard() {
       setLinkVerified(false);
       setValidatedMetadata(null);
       setSelectedAccounts([]);
+      localStorage.removeItem("campaign_draft");
       fetchStatusAndLogs();
     } catch (err: any) {
       const errorMsg = err.response?.data?.detail || err.response?.data?.error || err.message || "Queue job injection failed. Publishing worker is not running.";
@@ -469,90 +582,236 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* Public Media URL Input */}
-          <div className="space-y-3">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Media Source</h3>
-            <div className="space-y-2">
-              <label className="block text-xs font-semibold text-slate-500">Public Media URL *</label>
-              <div className="flex gap-2">
-                <input 
-                  type="text" 
-                  value={oneDriveUrl}
-                  onChange={(e) => setOneDriveUrl(e.target.value)}
-                  placeholder="OneDrive, Google Drive, Dropbox, S3, CDN, or raw direct link..."
-                  className="flex-1 px-4 py-2.5 rounded-xl bg-slate-900/50 border border-slate-800 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/50 outline-none text-slate-200 text-sm transition-all placeholder:text-slate-700"
-                />
+          {/* Media Source Toggle and Inputs */}
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">Media Source</label>
+              <div className="flex bg-slate-900/50 p-1 rounded-xl border border-slate-850 gap-1">
                 <button
                   type="button"
-                  onClick={handleValidateLink}
-                  disabled={validatingLink || !oneDriveUrl}
-                  className="px-5 py-2.5 border border-slate-800 hover:bg-slate-900 rounded-xl text-xs font-bold text-slate-300 transition-all cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+                  onClick={() => {
+                    setMediaSourceTab('url');
+                    handleRemoveUploadedFile();
+                  }}
+                  className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    mediaSourceTab === 'url' 
+                      ? "bg-purple-500/10 border border-purple-500/20 text-purple-400 font-extrabold" 
+                      : "text-slate-500 hover:text-slate-350 border border-transparent"
+                  }`}
                 >
-                  {validatingLink ? (
-                    <>
-                      <svg className="animate-spin h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                      </svg>
-                      <span>Validating...</span>
-                    </>
-                  ) : (
-                    <span>Validate Link</span>
-                  )}
+                  <Globe size={13} />
+                  <span>Public Media URL</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMediaSourceTab('upload');
+                    handleRemoveUploadedFile();
+                  }}
+                  className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    mediaSourceTab === 'upload' 
+                      ? "bg-purple-500/10 border border-purple-500/20 text-purple-400 font-extrabold" 
+                      : "text-slate-500 hover:text-slate-350 border border-transparent"
+                  }`}
+                >
+                  <Download size={13} className="rotate-180" />
+                  <span>Upload from Device</span>
                 </button>
               </div>
             </div>
 
-            {/* Display Verified File Details and Preview */}
-            {linkVerified && validatedMetadata && (
-              <motion.div 
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="p-4 rounded-xl bg-purple-500/5 border border-purple-500/10 space-y-4"
-              >
-                <div className="flex items-center justify-between text-xs font-bold">
-                  <div className="flex items-center gap-2 text-purple-400">
-                    <CheckCircle2 size={16} />
-                    <span>Public Media URL Verified</span>
+            {mediaSourceTab === 'url' && (
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <label className="block text-xs font-semibold text-slate-500">Public Media URL *</label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="text" 
+                      value={oneDriveUrl}
+                      onChange={(e) => setOneDriveUrl(e.target.value)}
+                      placeholder="OneDrive, Google Drive, Dropbox, S3, CDN, or raw direct link..."
+                      className="flex-1 px-4 py-2.5 rounded-xl bg-slate-900/50 border border-slate-800 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/50 outline-none text-slate-200 text-sm transition-all placeholder:text-slate-700"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleValidateLink}
+                      disabled={validatingLink || !oneDriveUrl}
+                      className="px-5 py-2.5 border border-slate-800 hover:bg-slate-900 rounded-xl text-xs font-bold text-slate-300 transition-all cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+                    >
+                      {validatingLink ? (
+                        <>
+                          <svg className="animate-spin h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                          <span>Validating...</span>
+                        </>
+                      ) : (
+                        <span>Validate Link</span>
+                      )}
+                    </button>
                   </div>
-                  <span className="text-[10px] text-green-400 bg-green-500/10 border border-green-500/20 px-2 py-0.5 rounded uppercase tracking-wider">
-                    Status: Valid
-                  </span>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs">
-                  <div>
-                    <span className="block text-slate-500 font-bold uppercase text-[9px] tracking-wider">File Name</span>
-                    <span className="text-slate-200 font-medium truncate block max-w-[200px]">{validatedMetadata.filename}</span>
-                  </div>
-                  <div>
-                    <span className="block text-slate-500 font-bold uppercase text-[9px] tracking-wider">File Type</span>
-                    <span className="text-slate-200 font-medium">{validatedMetadata.mime_type.startsWith("video") ? "Video" : "Image"}</span>
-                  </div>
-                  <div>
-                    <span className="block text-slate-500 font-bold uppercase text-[9px] tracking-wider">File Size</span>
-                    <span className="text-slate-200 font-mono font-medium">{formatBytes(validatedMetadata.size)}</span>
-                  </div>
-                </div>
+                {/* Display Verified File Details and Preview */}
+                {linkVerified && validatedMetadata && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-4 rounded-xl bg-purple-500/5 border border-purple-500/10 space-y-4"
+                  >
+                    <div className="flex items-center justify-between text-xs font-bold">
+                      <div className="flex items-center gap-2 text-purple-400">
+                        <CheckCircle2 size={16} />
+                        <span>Public Media URL Verified</span>
+                      </div>
+                      <span className="text-[10px] text-green-400 bg-green-500/10 border border-green-500/20 px-2 py-0.5 rounded uppercase tracking-wider">
+                        Status: Valid
+                      </span>
+                    </div>
 
-                <div>
-                  <span className="block text-slate-500 font-bold uppercase text-[9px] tracking-wider">Final Resolved Media URL</span>
-                  <span className="text-slate-200 font-mono text-[10px] truncate block max-w-full text-slate-400 select-all" title={mediaUrl}>
-                    {mediaUrl}
-                  </span>
-                </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs">
+                      <div>
+                        <span className="block text-slate-500 font-bold uppercase text-[9px] tracking-wider">File Name</span>
+                        <span className="text-slate-200 font-medium truncate block max-w-[200px]">{validatedMetadata.filename}</span>
+                      </div>
+                      <div>
+                        <span className="block text-slate-500 font-bold uppercase text-[9px] tracking-wider">File Type</span>
+                        <span className="text-slate-200 font-medium">{validatedMetadata.mime_type.startsWith("video") ? "Video" : "Image"}</span>
+                      </div>
+                      <div>
+                        <span className="block text-slate-500 font-bold uppercase text-[9px] tracking-wider">File Size</span>
+                        <span className="text-slate-200 font-mono font-medium">{formatBytes(validatedMetadata.size)}</span>
+                      </div>
+                    </div>
 
-                <div className="space-y-1.5">
-                  <span className="block text-slate-500 font-bold uppercase text-[9px] tracking-wider">Preview</span>
-                  <div className="w-full h-48 bg-slate-950/60 rounded-xl overflow-hidden border border-slate-900 flex items-center justify-center relative">
-                    {mediaType === "REELS" ? (
-                      <video src={mediaUrl} controls className="w-full h-full object-contain" />
-                    ) : (
-                      <img src={mediaUrl} className="w-full h-full object-contain" alt="Media Preview" />
-                    )}
+                    <div>
+                      <span className="block text-slate-500 font-bold uppercase text-[9px] tracking-wider">Final Resolved Media URL</span>
+                      <span className="text-slate-200 font-mono text-[10px] truncate block max-w-full text-slate-400 select-all" title={mediaUrl}>
+                        {mediaUrl}
+                      </span>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <span className="block text-slate-500 font-bold uppercase text-[9px] tracking-wider">Preview</span>
+                      <div className="w-full h-48 bg-slate-950/60 rounded-xl overflow-hidden border border-slate-900 flex items-center justify-center relative">
+                        {mediaType === "REELS" ? (
+                          <video src={mediaUrl} controls className="w-full h-full object-contain" />
+                        ) : (
+                          <img src={mediaUrl} className="w-full h-full object-contain" alt="Media Preview" />
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </div>
+            )}
+
+            {mediaSourceTab === 'upload' && (
+              <div className="space-y-3">
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files.length > 0) {
+                      handleLocalFileUpload(e.target.files[0]);
+                    }
+                  }}
+                  accept="image/jpeg,image/jpg,image/png,image/webp,video/mp4,video/quicktime"
+                  className="hidden"
+                />
+
+                {!linkVerified && !uploadingFile && (
+                  <div 
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                        handleLocalFileUpload(e.dataTransfer.files[0]);
+                      }
+                    }}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="border-2 border-dashed border-slate-800 hover:border-purple-500/50 bg-slate-950/40 hover:bg-purple-500/[0.02] p-8 rounded-2xl text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-3"
+                  >
+                    <div className="p-3 bg-purple-500/10 border border-purple-500/20 text-purple-400 rounded-xl">
+                      <Download size={24} className="rotate-180" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-slate-200">Drag & Drop files here, or <span className="text-purple-400">Browse Files</span></p>
+                      <p className="text-[10px] text-slate-500 mt-1">Supports JPG, JPEG, PNG, WEBP (max 10MB) & MP4, MOV (max 100MB)</p>
+                    </div>
                   </div>
-                </div>
-              </motion.div>
+                )}
+
+                {uploadingFile && (
+                  <div className="p-6 rounded-2xl border border-slate-850 bg-slate-950/40 space-y-4 text-center">
+                    <RefreshCw size={20} className="animate-spin text-purple-500 mx-auto" />
+                    <div className="space-y-2">
+                      <p className="text-xs font-bold text-slate-300">Uploading media to secure storage...</p>
+                      <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-800">
+                        <div 
+                          className="bg-purple-500 h-full rounded-full transition-all duration-300"
+                          style={{ width: `${uploadProgress}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] text-purple-400 font-mono font-bold">{uploadProgress}% uploaded</span>
+                    </div>
+                  </div>
+                )}
+
+                {linkVerified && validatedMetadata && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-4 rounded-xl bg-purple-500/5 border border-purple-500/10 space-y-4"
+                  >
+                    <div className="flex items-center justify-between text-xs font-bold">
+                      <div className="flex items-center gap-2 text-purple-400">
+                        <CheckCircle2 size={16} />
+                        <span>Device Upload Completed</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleRemoveUploadedFile}
+                        className="text-[10px] text-red-400 bg-red-500/10 border border-red-500/20 px-2 py-0.5 rounded uppercase tracking-wider flex items-center gap-1 cursor-pointer hover:bg-red-500/20 transition-all"
+                      >
+                        <Trash2 size={10} />
+                        <span>Remove</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs">
+                      <div>
+                        <span className="block text-slate-500 font-bold uppercase text-[9px] tracking-wider">File Name</span>
+                        <span className="text-slate-200 font-medium truncate block max-w-[200px]">{validatedMetadata.filename}</span>
+                      </div>
+                      <div>
+                        <span className="block text-slate-500 font-bold uppercase text-[9px] tracking-wider">File Type</span>
+                        <span className="text-slate-200 font-medium">{validatedMetadata.mime_type.startsWith("video") ? "Video" : "Image"}</span>
+                      </div>
+                      <div>
+                        <span className="block text-slate-500 font-bold uppercase text-[9px] tracking-wider">File Size</span>
+                        <span className="text-slate-200 font-mono font-medium">{formatBytes(validatedMetadata.size)}</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <span className="block text-slate-500 font-bold uppercase text-[9px] tracking-wider">Preview</span>
+                      <div className="w-full h-48 bg-slate-950/60 rounded-xl overflow-hidden border border-slate-900 flex items-center justify-center relative">
+                        {mediaType === "REELS" ? (
+                          <video src={mediaUrl} controls className="w-full h-full object-contain" />
+                        ) : (
+                          <img src={mediaUrl} className="w-full h-full object-contain" alt="Media Preview" />
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </div>
             )}
           </div>
 
