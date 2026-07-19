@@ -35,7 +35,13 @@ export default function Login() {
 
       navigate("/");
     } catch (err: any) {
-      const msg = err.response?.data?.detail || "Failed to log in. Please try again.";
+      console.error("Login failure:", err);
+      let msg = "Failed to log in. Please try again.";
+      if (err.response?.data?.detail) {
+        msg = err.response.data.detail;
+      } else if (err.message) {
+        msg = `${err.message}. Please verify the API endpoint is active and CORS is configured.`;
+      }
       setError(msg);
     } finally {
       setLoading(false);

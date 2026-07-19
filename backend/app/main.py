@@ -50,8 +50,11 @@ app.add_middleware(
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost",
-        "http://127.0.0.1"
+        "http://127.0.0.1",
+        "https://agentkaruppu.netlify.app",
+        "https://agent-karuppu.netlify.app"
     ],
+    allow_origin_regex=r"https://.*\.netlify\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
