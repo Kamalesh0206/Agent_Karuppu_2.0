@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
 import { API_URL } from '../config.ts';
 import { motion } from 'framer-motion';
+import BrandLogo from '../components/BrandLogo';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -61,11 +62,7 @@ export default function Login() {
         <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-pink-500/10 rounded-full blur-3xl" />
 
         <div className="text-center mb-8 relative">
-          <img 
-            src="/logo.jpg" 
-            alt="Agent Logo" 
-            className="w-48 h-48 rounded-2xl mx-auto mb-4 shadow-lg shadow-purple-500/20 object-cover border border-purple-500/20"
-          />
+          <BrandLogo size="hero" className="mx-auto mb-4" />
           <h2 className="text-3xl font-black font-outfit text-slate-100 mb-2">Welcome Back</h2>
           <p className="text-sm text-slate-400">Sign in to your AgentKaruppu publishing console</p>
         </div>

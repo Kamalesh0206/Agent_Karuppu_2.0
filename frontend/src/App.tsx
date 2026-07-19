@@ -7,6 +7,7 @@ import {
   LogOut, Menu, X, User as UserIcon, Key
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import BrandLogo from './components/BrandLogo';
 
 // Axios Interceptor for token expiration handling
 axios.interceptors.response.use(
@@ -65,11 +66,7 @@ const DashboardLayout = () => {
       <div>
         {/* Brand Header */}
         <div className="flex flex-col items-center text-center px-2 py-4 mb-6 border-b border-slate-900 pb-6">
-          <img 
-            src="/logo.jpg" 
-            alt="Agent Logo" 
-            className="w-48 h-48 rounded-2xl object-cover border border-purple-500/20 shadow-lg shadow-purple-500/10 mb-4"
-          />
+          <BrandLogo size="medium" className="mb-4" />
           <div>
             <h1 className="text-xl font-black font-outfit gradient-text tracking-wide">AgentKaruppu</h1>
             <span className="text-[10px] text-slate-400 font-mono tracking-widest uppercase">SaaS Publisher</span>
@@ -132,6 +129,7 @@ const DashboardLayout = () => {
           >
             <Menu size={20} />
           </button>
+          <BrandLogo size="small" />
           <h1 className="text-lg font-black font-outfit gradient-text">AgentKaruppu</h1>
         </div>
       </header>
