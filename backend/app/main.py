@@ -290,15 +290,9 @@ def get_super_admin(current_user: User = Depends(get_current_user)) -> User:
 # --- Health & Version Endpoints ---
 
 @app.get("/")
-def root_health():
-    return {
-        "status": "healthy",
-        "service": settings.PROJECT_NAME,
-        "version": "4.0.0",
-        "docs_url": "/docs"
-    }
-
 @app.get("/health")
+@app.get("/api/health")
+@app.get("/v1/health")
 def health_check(db: Session = Depends(get_db)):
     db_status = "connected"
     try:
@@ -315,6 +309,7 @@ def health_check(db: Session = Depends(get_db)):
         "environment": "production"
     }
 
+@app.get("/version")
 @app.get("/api/version")
 def api_version():
     return {
@@ -600,6 +595,8 @@ def check_account_modification_permission(account: InstagramAccount, user: User)
 # --- Accounts CRUD Routes ---
 
 @app.get("/accounts", response_model=List[InstagramAccountResponse])
+@app.get("/api/accounts", response_model=List[InstagramAccountResponse])
+@app.get("/instagram/accounts", response_model=List[InstagramAccountResponse])
 def get_accounts(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     # Synchronize profiles followers counts on loading accounts
     accounts = db.query(InstagramAccount).all()
@@ -651,6 +648,9 @@ def get_accounts(db: Session = Depends(get_db), current_user: User = Depends(get
     return results
 
 @app.post("/accounts/connect", response_model=InstagramAccountResponse)
+@app.post("/api/accounts/connect", response_model=InstagramAccountResponse)
+@app.post("/accounts", response_model=InstagramAccountResponse)
+@app.post("/api/accounts", response_model=InstagramAccountResponse)
 def connect_account_manually(
     acc_data: InstagramAccountCreate, 
     request: Request,
@@ -764,6 +764,7 @@ def update_account_credentials(
     return acc
 
 @app.delete("/accounts/{id}")
+@app.delete("/api/accounts/{id}")
 def delete_account(id: int, request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     acc = db.query(InstagramAccount).filter(InstagramAccount.id == id).first()
     if not acc:
@@ -930,6 +931,7 @@ def link_instagram_to_group(
     return new_acc
 
 @app.get("/groups", response_model=List[GroupResponse])
+@app.get("/api/groups", response_model=List[GroupResponse])
 def get_groups(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     # Load all groups (shared globally)
     user_groups = db.query(Group).all()
@@ -968,6 +970,7 @@ def get_groups(db: Session = Depends(get_db), current_user: User = Depends(get_c
     return responses
 
 @app.post("/groups", response_model=GroupResponse)
+@app.post("/api/groups", response_model=GroupResponse)
 def create_group(group_data: GroupCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     new_group = Group(user_id=current_user.id, name=group_data.name)
     db.add(new_group)
@@ -983,6 +986,7 @@ def create_group(group_data: GroupCreate, db: Session = Depends(get_db), current
     )
 
 @app.put("/groups/{id}", response_model=GroupResponse)
+@app.put("/api/groups/{id}", response_model=GroupResponse)
 def update_group(id: int, group_data: GroupUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     group = db.query(Group).filter(Group.id == id).first()
     if not group:
@@ -1010,6 +1014,7 @@ def update_group(id: int, group_data: GroupUpdate, db: Session = Depends(get_db)
     )
 
 @app.delete("/groups/{id}")
+@app.delete("/api/groups/{id}")
 def delete_group(id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     group = db.query(Group).filter(Group.id == id).first()
     if not group:
@@ -1360,11 +1365,19 @@ def get_publishing_status(db: Session = Depends(get_db), current_user: User = De
     return db.query(PublishingQueue).join(Post).filter(Post.user_id == current_user.id).order_by(PublishingQueue.id.desc()).all()
 
 @app.get("/publish/history", response_model=List[PublishingHistoryResponse])
+@app.get("/api/publish/history", response_model=List[PublishingHistoryResponse])
+@app.get("/history", response_model=List[PublishingHistoryResponse])
+@app.get("/api/history", response_model=List[PublishingHistoryResponse])
 def get_publishing_history(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Retrieve success publications history."""
     return db.query(PublishingHistory).join(Post).filter(Post.user_id == current_user.id).order_by(PublishingHistory.published_time.desc()).all()
 
 @app.get("/publish/logs", response_model=List[AuditLogResponse])
+@app.get("/api/publish/logs", response_model=List[AuditLogResponse])
+@app.get("/logs", response_model=List[AuditLogResponse])
+@app.get("/api/logs", response_model=List[AuditLogResponse])
+@app.get("/audit-logs", response_model=List[AuditLogResponse])
+@app.get("/api/audit-logs", response_model=List[AuditLogResponse])
 def get_audit_logs(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Fetch user audit trail."""
     return db.query(AuditLog).filter(AuditLog.user_id == current_user.id).order_by(AuditLog.created_at.desc()).all()
