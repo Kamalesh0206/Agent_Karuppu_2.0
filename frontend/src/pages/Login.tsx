@@ -131,7 +131,7 @@ export default function Login() {
         <div className="text-center mb-6 relative">
           <BrandLogo size="hero" className="mx-auto mb-4" />
           <h2 className="text-3xl font-black font-outfit text-slate-100 mb-2">Welcome Back</h2>
-          <p className="text-sm text-slate-400">Sign in to your AgentKaruppu publishing console</p>
+          <p className="text-sm text-slate-400">Sign in to your The NexRevo publishing console</p>
         </div>
 
         {error && (

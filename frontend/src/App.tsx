@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import axios from 'axios';
 import { 
   LayoutDashboard, Users, History, FileText, Settings as SettingsIcon, 
-  LogOut, Menu, X, User as UserIcon, Key
+  LogOut, Menu, X, User as UserIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import BrandLogo from './components/BrandLogo';
@@ -28,7 +28,6 @@ import Accounts from './pages/Accounts';
 import PublishingHistory from './pages/History';
 import Logs from './pages/Logs';
 import Settings from './pages/Settings';
-import Tokens from './pages/Tokens';
 import UserManagement from './pages/UserManagement';
 
 const queryClient = new QueryClient();
@@ -41,6 +40,16 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   }
   return <>{children}</>;
 };
+
+// 404 Error Page Component
+const NotFound = () => (
+  <div className="min-h-[70vh] flex flex-col items-center justify-center text-center p-6 space-y-4">
+    <div className="p-4 bg-purple-500/10 border border-purple-500/20 text-purple-400 rounded-2xl text-4xl font-black font-outfit">404</div>
+    <h2 className="text-2xl font-black text-slate-100 font-outfit">Page Not Found</h2>
+    <p className="text-sm text-slate-400 max-w-md">The page you are looking for does not exist or has been moved on The NexRevo platform.</p>
+    <Link to="/" className="px-6 py-2.5 bg-purple-500 hover:bg-purple-400 text-slate-950 font-bold rounded-xl text-xs transition-all shadow-lg shadow-purple-500/20">Return to Dashboard</Link>
+  </div>
+);
 
 // Sidebar Navigation Layout
 const DashboardLayout = () => {
@@ -75,8 +84,8 @@ const DashboardLayout = () => {
         <div className="flex flex-col items-center text-center px-2 py-4 mb-6 border-b border-slate-900 pb-6">
           <BrandLogo size="medium" className="mb-4" />
           <div>
-            <h1 className="text-xl font-black font-outfit gradient-text tracking-wide">AgentKaruppu</h1>
-            <span className="text-[10px] text-slate-400 font-mono tracking-widest uppercase">SaaS Publisher</span>
+            <h1 className="text-xl font-black font-outfit gradient-text tracking-wide">The NexRevo</h1>
+            <span className="text-[10px] text-slate-400 font-mono tracking-widest uppercase">AI Social Platform</span>
           </div>
         </div>
 
@@ -126,69 +135,79 @@ const DashboardLayout = () => {
   );
 
   return (
-    <div className="flex min-h-screen bg-slate-950 font-sans">
-      {/* Mobile Top Navbar */}
-      <header className="lg:hidden fixed top-0 left-0 w-full h-16 bg-slate-950/80 backdrop-blur-md border-b border-slate-900 px-4 flex items-center justify-between z-40">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setMobileOpen(true)}
-            className="p-2 text-slate-400 hover:text-slate-200 transition-colors"
-          >
-            <Menu size={20} />
-          </button>
-          <BrandLogo size="small" />
-          <h1 className="text-lg font-black font-outfit gradient-text">AgentKaruppu</h1>
-        </div>
-      </header>
-
-      {/* Mobile Overlay Menu */}
-      <AnimatePresence>
-        {mobileOpen && (
-          <>
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setMobileOpen(false)}
-              className="lg:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
-            />
-            <motion.div 
-              initial={{ x: '-100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '-100%' }}
-              transition={{ type: 'spring', damping: 25 }}
-              className="lg:hidden fixed top-0 left-0 bottom-0 w-72 z-50"
+    <div className="flex min-h-screen bg-slate-950 font-sans flex-col justify-between">
+      <div className="flex min-h-screen">
+        {/* Mobile Top Navbar */}
+        <header className="lg:hidden fixed top-0 left-0 w-full h-16 bg-slate-950/80 backdrop-blur-md border-b border-slate-900 px-4 flex items-center justify-between z-40">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setMobileOpen(true)}
+              className="p-2 text-slate-400 hover:text-slate-200 transition-colors"
             >
-              <div className="absolute right-4 top-4">
-                <button
-                  onClick={() => setMobileOpen(false)}
-                  className="p-2 text-slate-400 hover:text-slate-200"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-              {sidebarContent}
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+              <Menu size={20} />
+            </button>
+            <BrandLogo size="small" />
+            <h1 className="text-lg font-black font-outfit gradient-text">The NexRevo</h1>
+          </div>
+        </header>
 
-      {/* Desktop Sidebar */}
-      <aside className="hidden lg:block w-64 fixed top-0 bottom-0 left-0 z-30">
-        {sidebarContent}
-      </aside>
+        {/* Mobile Overlay Menu */}
+        <AnimatePresence>
+          {mobileOpen && (
+            <>
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setMobileOpen(false)}
+                className="lg:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
+              />
+              <motion.div 
+                initial={{ x: '-100%' }}
+                animate={{ x: 0 }}
+                exit={{ x: '-100%' }}
+                transition={{ type: 'spring', damping: 25 }}
+                className="lg:hidden fixed top-0 left-0 bottom-0 w-72 z-50"
+              >
+                <div className="absolute right-4 top-4">
+                  <button
+                    onClick={() => setMobileOpen(false)}
+                    className="p-2 text-slate-400 hover:text-slate-200"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+                {sidebarContent}
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
 
-      {/* Main Panel */}
-      <main className="flex-1 lg:ml-64 p-4 lg:p-8 pt-20 lg:pt-8 bg-slate-950">
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/accounts" element={<Accounts />} />
-          <Route path="/history" element={<PublishingHistory />} />
-          <Route path="/logs" element={<Logs />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/admin/users" element={isAdmin ? <UserManagement /> : <Navigate to="/" replace />} />
-        </Routes>
-      </main>
+        {/* Desktop Sidebar */}
+        <aside className="hidden lg:block w-64 fixed top-0 bottom-0 left-0 z-30">
+          {sidebarContent}
+        </aside>
+
+        {/* Main Panel */}
+        <main className="flex-1 lg:ml-64 p-4 lg:p-8 pt-20 lg:pt-8 bg-slate-950 flex flex-col justify-between">
+          <div className="flex-1">
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/accounts" element={<Accounts />} />
+              <Route path="/history" element={<PublishingHistory />} />
+              <Route path="/logs" element={<Logs />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/admin/users" element={isAdmin ? <UserManagement /> : <Navigate to="/" replace />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </div>
+
+          {/* Footer */}
+          <footer className="text-center text-xs text-slate-500 py-6 border-t border-slate-900/60 mt-12">
+            © 2026 The NexRevo. Building the Next Revolution in AI.
+          </footer>
+        </main>
+      </div>
     </div>
   );
 };

@@ -46,17 +46,22 @@ app = FastAPI(
 )
 
 # CORS Configuration
+allowed_origins_list = [
+    "https://thenexrevo.com",
+    "https://www.thenexrevo.com",
+    "https://api.thenexrevo.com",
+    "https://agentkaruppu.netlify.app",
+    "https://agent-karuppu.netlify.app",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000"
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost",
-        "http://127.0.0.1",
-        "https://agentkaruppu.netlify.app",
-        "https://agent-karuppu.netlify.app"
-    ],
-    allow_origin_regex=r"https://.*\.netlify\.app",
+    allow_origins=allowed_origins_list,
+    allow_origin_regex=r"https://.*thenexrevo\.com",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

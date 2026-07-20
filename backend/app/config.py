@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings
 from typing import Optional
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "Agent Karuppu"
+    PROJECT_NAME: str = "The NexRevo AI"
     
     # Database Settings
     DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/agent_karuppu"
@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = "placeholder-gemini-key"
     
     # Instagram Static Server Configuration
-    PUBLIC_URL_PREFIX: str = "http://localhost:8000/static/uploads"
+    PUBLIC_URL_PREFIX: str = "https://api.thenexrevo.com/static/uploads"
     
     # Default Admin Credentials
     ADMIN_USERNAME: str = "admin"
@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # Meta / Facebook Login OAuth Settings
     FACEBOOK_CLIENT_ID: str = ""
     FACEBOOK_CLIENT_SECRET: str = ""
-    FACEBOOK_REDIRECT_URI: str = "http://localhost:3000/auth/facebook/callback"
+    FACEBOOK_REDIRECT_URI: str = "https://thenexrevo.com/auth/facebook/callback"
 
     # AWS S3 Storage Settings
     AWS_ACCESS_KEY_ID: str = ""

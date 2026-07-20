@@ -129,7 +129,7 @@ export default function Signup() {
         <div className="text-center mb-6 relative">
           <BrandLogo size="hero" className="mx-auto mb-4" />
           <h2 className="text-3xl font-black font-outfit text-slate-100 mb-2">Create Account</h2>
-          <p className="text-sm text-slate-400">Join AgentKaruppu publishing network</p>
+          <p className="text-sm text-slate-400">Join The NexRevo AI network</p>
         </div>
 
         {error && (

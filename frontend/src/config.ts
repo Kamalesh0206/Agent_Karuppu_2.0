@@ -40,11 +40,11 @@ export const getApiUrl = (): string => {
       return "http://localhost:8000";
     }
 
-    // 4. Default Production Target (NEVER use Netlify frontend host as backend URL!)
-    return "http://localhost:8000";
+    // 4. Default Production Target (thenexrevo.com API backend)
+    return "https://api.thenexrevo.com";
   }
 
-  return "http://localhost:8000";
+  return "https://api.thenexrevo.com";
 };
 
 export const setCustomApiUrl = (newUrl: string) => {
