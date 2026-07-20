@@ -44,8 +44,9 @@ class Settings(BaseSettings):
     AWS_S3_REGION_NAME: Optional[str] = "us-east-1"
 
     # Supabase Storage Settings
-    SUPABASE_URL: str = ""
-    SUPABASE_KEY: str = ""
+    SUPABASE_URL: str = "https://rdgyufdkkovejzeqpswi.supabase.co"
+    SUPABASE_KEY: str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJkZ3l1ZmRra292ZWp6ZXFwc3dpIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NDM1NDQ0NywiZXhwIjoyMDk5OTMwNDQ3fQ._hy9iVC5AuOLljqm7mtcTMdx5B0IV7N117yqPfLS69Y"
+    SUPABASE_SERVICE_ROLE_KEY: str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJkZ3l1ZmRra292ZWp6ZXFwc3dpIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NDM1NDQ0NywiZXhwIjoyMDk5OTMwNDQ3fQ._hy9iVC5AuOLljqm7mtcTMdx5B0IV7N117yqPfLS69Y"
     SUPABASE_STORAGE_BUCKET: str = "Karuppu"
 
     class Config:

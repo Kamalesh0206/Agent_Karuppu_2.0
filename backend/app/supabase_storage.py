@@ -28,7 +28,7 @@ def upload_to_supabase_storage(file_content: bytes, original_filename: str, mime
     bucket = settings.SUPABASE_STORAGE_BUCKET or "Karuppu"
 
     base_url = (settings.SUPABASE_URL or "").strip().rstrip('/')
-    supabase_key = (settings.SUPABASE_KEY or "").strip()
+    supabase_key = (settings.SUPABASE_KEY or getattr(settings, "SUPABASE_SERVICE_ROLE_KEY", "") or "").strip()
 
     if not base_url or "your-supabase-project" in base_url or "placeholder" in base_url or not supabase_key:
         error_msg = (
