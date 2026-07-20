@@ -40,11 +40,11 @@ export const getApiUrl = (): string => {
       return "http://localhost:8000";
     }
 
-    // 4. Default Production Target (thenexrevo.com API backend)
-    return "https://api.thenexrevo.com";
+    // 4. Default Production Target (Render Live FastAPI Backend)
+    return "https://agent-karuppu-2-0-2.onrender.com";
   }
 
-  return "https://api.thenexrevo.com";
+  return "https://agent-karuppu-2-0-2.onrender.com";
 };
 
 export const setCustomApiUrl = (newUrl: string) => {

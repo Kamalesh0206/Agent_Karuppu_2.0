@@ -11,7 +11,7 @@ from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, R
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordBearer
-from fastapi.responses import RedirectResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -47,6 +47,7 @@ app = FastAPI(
 
 # CORS Configuration
 allowed_origins_list = [
+    "https://agent-karuppu-2-0-2.onrender.com",
     "https://thenexrevo.com",
     "https://www.thenexrevo.com",
     "https://api.thenexrevo.com",
@@ -54,6 +55,8 @@ allowed_origins_list = [
     "https://agent-karuppu.netlify.app",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
     "http://localhost:8000",
     "http://127.0.0.1:8000"
 ]
@@ -61,7 +64,7 @@ allowed_origins_list = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins_list,
-    allow_origin_regex=r"https://.*thenexrevo\.com",
+    allow_origin_regex=r"https://.*(thenexrevo\.com|netlify\.app|onrender\.com)",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -286,16 +289,27 @@ def get_super_admin(current_user: User = Depends(get_current_user)) -> User:
 
 # --- Health & Version Endpoints ---
 
+@app.get("/")
+def root_health():
+    return {
+        "status": "healthy",
+        "service": settings.PROJECT_NAME,
+        "version": "4.0.0",
+        "docs_url": "/docs"
+    }
+
 @app.get("/health")
 def health_check(db: Session = Depends(get_db)):
     db_status = "connected"
     try:
         db.execute(text("SELECT 1"))
     except Exception as e:
+        logger.error(f"[Health Check Error] Database execution failed: {e}")
         db_status = f"disconnected: {str(e)}"
 
+    is_healthy = db_status == "connected"
     return {
-        "status": "healthy" if db_status == "connected" else "unhealthy",
+        "status": "healthy" if is_healthy else "unhealthy",
         "database": db_status,
         "version": "4.0.0",
         "environment": "production"
