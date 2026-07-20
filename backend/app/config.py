@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     AWS_S3_REGION_NAME: Optional[str] = "us-east-1"
 
     # Supabase Storage Settings
-    SUPABASE_URL: str = "https://your-supabase-project.supabase.co"
+    SUPABASE_URL: str = ""
     SUPABASE_KEY: str = ""
     SUPABASE_STORAGE_BUCKET: str = "Karuppu"
 

@@ -27,11 +27,21 @@ def upload_to_supabase_storage(file_content: bytes, original_filename: str, mime
     storage_path = f"{folder}/{year_str}/{month_str}/{stored_filename}"
     bucket = settings.SUPABASE_STORAGE_BUCKET or "Karuppu"
 
-    base_url = settings.SUPABASE_URL.rstrip('/')
+    base_url = (settings.SUPABASE_URL or "").strip().rstrip('/')
+    supabase_key = (settings.SUPABASE_KEY or "").strip()
+
+    if not base_url or "your-supabase-project" in base_url or "placeholder" in base_url or not supabase_key:
+        error_msg = (
+            "Supabase Storage Unconfigured: SUPABASE_URL and SUPABASE_KEY environment variables are missing or invalid on Render. "
+            "Please set SUPABASE_URL (e.g. https://xyz.supabase.co) and SUPABASE_KEY in your Render dashboard environment settings."
+        )
+        logger.error(f"[Supabase Storage Config Error] {error_msg}")
+        raise Exception(error_msg)
+
     upload_url = f"{base_url}/storage/v1/object/{bucket}/{storage_path}"
 
     headers = {
-        "Authorization": f"Bearer {settings.SUPABASE_KEY}",
+        "Authorization": f"Bearer {supabase_key}",
         "Content-Type": mime_type or ("image/jpeg" if is_image else "video/mp4"),
         "x-upsert": "true"
     }
