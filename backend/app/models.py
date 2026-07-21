@@ -1,8 +1,11 @@
 from typing import Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from .database import Base
+
+def utcnow():
+    return datetime.now(timezone.utc)
 
 class User(Base):
     __tablename__ = "users"
@@ -30,8 +33,8 @@ class User(Base):
     mobile_verified = Column(Boolean, default=True, nullable=False)
     publishing_permission = Column(Boolean, default=True, nullable=False)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     # Relationships
     accounts = relationship("InstagramAccount", back_populates="user", cascade="all, delete-orphan", foreign_keys="[InstagramAccount.user_id]")
@@ -66,14 +69,14 @@ class InstagramAccount(Base):
     owner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     owner_name = Column(String, nullable=True)
     linked_by = Column(String, nullable=True)
-    linked_at = Column(DateTime, default=datetime.utcnow)
+    linked_at = Column(DateTime, default=utcnow)
     created_by = Column(String, nullable=True)
     updated_by = Column(String, nullable=True)
     last_modified_by = Column(String, nullable=True)
     last_modified_at = Column(DateTime, nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     # Relationships
     user = relationship("User", back_populates="accounts", foreign_keys=[user_id])
@@ -101,7 +104,7 @@ class Post(Base):
     filename = Column(String, nullable=True)
     mime_type = Column(String, nullable=True)
     file_size = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     # Relationships
     user = relationship("User", back_populates="posts")
@@ -119,8 +122,8 @@ class PublishingQueue(Base):
     current_step: Any = Column(String, nullable=True)
     elapsed_time: Any = Column(Integer, default=0, nullable=False)  # seconds
     retry_count: Any = Column(Integer, default=0, nullable=False)
-    created_at: Any = Column(DateTime, default=datetime.utcnow)
-    updated_at: Any = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Any = Column(DateTime, default=utcnow)
+    updated_at: Any = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     # Relationships
     post = relationship("Post", back_populates="queue_entries")
@@ -134,7 +137,7 @@ class PublishingHistory(Base):
     post_id = Column(Integer, ForeignKey("posts.id", ondelete="CASCADE"), nullable=False)
     account_id = Column(Integer, ForeignKey("instagram_accounts.id", ondelete="CASCADE"), nullable=False)
     media_id = Column(String, nullable=False)  # Published Post ID from Meta
-    published_time = Column(DateTime, default=datetime.utcnow)
+    published_time = Column(DateTime, default=utcnow)
     caption = Column(Text, nullable=True)
     media_url = Column(Text, nullable=True)
     username = Column(String, nullable=False)
@@ -156,7 +159,7 @@ class PublishingLog(Base):
     request_url = Column(Text, nullable=True)
     request_body = Column(Text, nullable=True)
     response = Column(Text, nullable=True)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=utcnow)
     retry_count = Column(Integer, default=0, nullable=False)
 
     # Relationships
@@ -170,7 +173,7 @@ class AccessToken(Base):
     token = Column(Text, unique=True, index=True, nullable=False)
     is_revoked = Column(Boolean, default=False, nullable=False)
     expires_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     user = relationship("User", back_populates="access_tokens")
 
@@ -182,7 +185,7 @@ class RefreshToken(Base):
     token = Column(Text, unique=True, index=True, nullable=False)
     is_revoked = Column(Boolean, default=False, nullable=False)
     expires_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     user = relationship("User", back_populates="refresh_tokens")
 
@@ -194,7 +197,7 @@ class AuditLog(Base):
     action = Column(String, nullable=False)  # "Login", "Logout", "OAuth", "Publishing", "Token Refresh", "Failures", "Errors", "User Action"
     description = Column(Text, nullable=False)
     ip_address = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     user = relationship("User", back_populates="audit_logs")
 
@@ -204,8 +207,8 @@ class Group(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     name = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
     
     # Relationships
     user = relationship("User", back_populates="groups")
@@ -224,7 +227,7 @@ class SyncedPost(Base):
     like_count = Column(Integer, default=0)
     comment_count = Column(Integer, default=0)
     published_at = Column(DateTime, nullable=True)
-    synced_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    synced_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     # Relationships
     account = relationship("InstagramAccount", back_populates="synced_posts")
@@ -236,7 +239,7 @@ class FollowRelationship(Base):
     follower_account_id = Column(Integer, ForeignKey("instagram_accounts.id", ondelete="CASCADE"), nullable=False)
     followed_account_id = Column(Integer, ForeignKey("instagram_accounts.id", ondelete="CASCADE"), nullable=False)
     status = Column(String, default="Unknown", nullable=False)  # Following, Not Following, Unknown
-    last_checked = Column(DateTime, default=datetime.utcnow)
+    last_checked = Column(DateTime, default=utcnow)
 
     # Relationships
     follower = relationship("InstagramAccount", foreign_keys=[follower_account_id], back_populates="following_relationships")
@@ -252,7 +255,7 @@ class Follower(Base):
     display_name = Column(String, nullable=True)
     is_verified = Column(Boolean, default=False)
     account_type = Column(String, nullable=True)
-    last_synced = Column(DateTime, default=datetime.utcnow)
+    last_synced = Column(DateTime, default=utcnow)
     source = Column(String, default="Mock API")
 
     # Relationships
@@ -268,7 +271,7 @@ class Following(Base):
     display_name = Column(String, nullable=True)
     is_verified = Column(Boolean, default=False)
     account_type = Column(String, nullable=True)
-    last_synced = Column(DateTime, default=datetime.utcnow)
+    last_synced = Column(DateTime, default=utcnow)
     source = Column(String, default="Mock API")
 
     # Relationships
@@ -283,7 +286,7 @@ class SyncHistory(Base):
     status = Column(String, default="success")  # success, failed, unsupported
     progress = Column(Integer, default=100)
     message = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     # Relationships
     account = relationship("InstagramAccount", back_populates="sync_histories")
@@ -303,4 +306,4 @@ class MediaUpload(Base):
     public_url = Column(Text, nullable=True)
     storage_url = Column(Text, nullable=False)
     uploaded_by = Column(String, nullable=True)
-    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    uploaded_at = Column(DateTime, default=utcnow)
