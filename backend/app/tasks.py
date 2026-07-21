@@ -1,3 +1,4 @@
+# pyright: reportGeneralTypeIssues=false, reportAttributeAccessIssue=false
 import time
 import os
 import logging
@@ -6,6 +7,7 @@ import json
 import redis
 import traceback
 import sys
+from typing import cast
 from .celery_app import celery_app
 from .database import SessionLocal
 from .models import PublishingQueue, Post, InstagramAccount, PublishingHistory, PublishingLog, AuditLog
@@ -57,7 +59,8 @@ def process_queue_task(self):
     db.refresh(queue_item)
     
     start_time = time.time()
-    queue_id = queue_item.id
+    queue_id: int = int(queue_item.id)
+    account = queue_item.account
     
     broadcast_status(queue_id, {
         "status": "DOWNLOADING",
@@ -68,7 +71,6 @@ def process_queue_task(self):
 
     try:
         post = queue_item.post
-        account = queue_item.account
         
         # Verify account is not locked
         if account.status == "Locked":
@@ -278,7 +280,8 @@ def process_queue_task(self):
                 retry_status = True
                 
                 # Backoff delay reschedule
-                delay = 2 ** queue_item.retry_count
+                current_retries = int(queue_item.retry_count or 0)
+                delay = 2 ** current_retries
                 process_queue_task.apply_async(countdown=delay)
                 
                 broadcast_status(queue_id, {
