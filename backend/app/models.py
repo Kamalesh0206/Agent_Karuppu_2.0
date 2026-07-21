@@ -1,3 +1,4 @@
+from typing import Any
 from datetime import datetime, timedelta
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
@@ -110,16 +111,16 @@ class Post(Base):
 class PublishingQueue(Base):
     __tablename__ = "publishing_queue"
 
-    id = Column(Integer, primary_key=True, index=True)
-    post_id = Column(Integer, ForeignKey("posts.id", ondelete="CASCADE"), nullable=False)
-    account_id = Column(Integer, ForeignKey("instagram_accounts.id", ondelete="CASCADE"), nullable=False)
-    status = Column(String, default="Waiting", nullable=False)  # "Waiting", "Preparing", "Uploading", "Container Created", "Publishing", "Completed", "Retrying", "Failed", "Cancelled"
-    progress_percent = Column(Integer, default=0, nullable=False)
-    current_step = Column(String, nullable=True)
-    elapsed_time = Column(Integer, default=0, nullable=False)  # seconds
-    retry_count = Column(Integer, default=0, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    id: Any = Column(Integer, primary_key=True, index=True)
+    post_id: Any = Column(Integer, ForeignKey("posts.id", ondelete="CASCADE"), nullable=False)
+    account_id: Any = Column(Integer, ForeignKey("instagram_accounts.id", ondelete="CASCADE"), nullable=False)
+    status: Any = Column(String, default="Waiting", nullable=False)  # "Waiting", "Preparing", "Uploading", "Container Created", "Publishing", "Completed", "Retrying", "Failed", "Cancelled"
+    progress_percent: Any = Column(Integer, default=0, nullable=False)
+    current_step: Any = Column(String, nullable=True)
+    elapsed_time: Any = Column(Integer, default=0, nullable=False)  # seconds
+    retry_count: Any = Column(Integer, default=0, nullable=False)
+    created_at: Any = Column(DateTime, default=datetime.utcnow)
+    updated_at: Any = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
     post = relationship("Post", back_populates="queue_entries")

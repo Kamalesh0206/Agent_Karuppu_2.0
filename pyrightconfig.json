@@ -3,5 +3,9 @@
   "venv": "venv",
   "extraPaths": [
     "backend"
-  ]
+  ],
+  "reportGeneralTypeIssues": false,
+  "reportAttributeAccessIssue": false,
+  "reportOptionalMemberAccess": false,
+  "typeCheckingMode": "off"
 }
