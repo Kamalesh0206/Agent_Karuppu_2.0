@@ -1201,9 +1201,11 @@ def update_group_profile_tokens(
 # --- Publishing Routes ---
 
 @app.post("/publish")
+@app.post("/api/publish")
 def publish_post(
     pub_req: PublishRequest, 
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_user)
 ):
@@ -1220,11 +1222,10 @@ def publish_post(
     logger.info(f"[Publish Workflow] User validated: {current_user.username} | Request ID: {request_id}")
 
     try:
-        # Verify background Celery worker is running using the WorkerService
+        # Check background Celery worker status
         from .worker_service import WorkerService
         status_info = WorkerService.get_status()
-        if not status_info["worker_running"]:
-            raise ValueError("Publishing worker is not running. Job has been queued but cannot be processed.")
+        worker_active = status_info.get("worker_running", False)
 
         # Validate Media
         if not pub_req.media_url:
@@ -1291,21 +1292,21 @@ def publish_post(
             logger.info(f"[Queue] Job ID created: {queue_item.id}")
             logger.info(f"[Publish Workflow] Queue injection completed for @{acc.instagram_username} | Queue Item ID {queue_item.id} | Request ID: {request_id}")
 
-        # 3. Submit queue processing task via Celery apply_async
+        # 3. Submit queue processing task via Celery or BackgroundTasks fallback
         task_id = str(uuid.uuid4())
         logger.info("Submitting publish task...")
         logger.info(f"Broker URL: {settings.REDIS_URL}")
-        logger.info("Queue name: celery")
-        logger.info("Task name: app.tasks.process_queue_task")
-        logger.info(f"Task ID: {task_id}")
         
-        try:
-            task = process_queue_task.apply_async(task_id=task_id)
-            logger.info("Task successfully queued.")
-        except Exception as queue_err:
-            tb = traceback.format_exc()
-            logger.error(f"Task submission failed: {queue_err}\nTraceback:\n{tb}")
-            raise queue_err
+        if worker_active:
+            try:
+                task = process_queue_task.apply_async(task_id=task_id)
+                logger.info("[Publish Workflow] Task enqueued to active Celery worker.")
+            except Exception as queue_err:
+                logger.warning(f"[Publish Workflow] Celery dispatch error: {queue_err}. Triggering BackgroundTasks fallback.")
+                background_tasks.add_task(process_queue_task)
+        else:
+            logger.info("[Publish Workflow] Celery worker offline; dispatching in-process FastAPI background task.")
+            background_tasks.add_task(process_queue_task)
 
         create_audit_log(
             db=db,
@@ -1316,7 +1317,7 @@ def publish_post(
         )
 
         return {
-            "task_id": task.id,
+            "task_id": task_id,
             "status": "queued"
         }
 
@@ -1341,7 +1342,7 @@ def publish_post(
         )
 
 @app.post("/publish/{id}/retry")
-def retry_failed_publish_item(id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def retry_failed_publish_item(id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     item = db.query(PublishingQueue).filter(PublishingQueue.id == id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Queue item not found.")
@@ -1352,7 +1353,10 @@ def retry_failed_publish_item(id: int, db: Session = Depends(get_db), current_us
     item.retry_count = 0
     db.commit()
     
-    process_queue_task.delay()
+    try:
+        process_queue_task.apply_async()
+    except Exception:
+        background_tasks.add_task(process_queue_task)
     return {"detail": "Retry enqueued successfully."}
 
 @app.get("/publish-history/{id}/logs", response_model=List[PublishingLogResponse])

@@ -40,7 +40,7 @@ def process_queue_task(self):
     
     # 1. Fetch next queue item ordered by creation date (FIFO)
     queue_item = db.query(PublishingQueue).filter(
-        PublishingQueue.status.in_(["QUEUED", "Waiting", "Retrying"])
+        PublishingQueue.status.in_(["QUEUED", "Waiting", "Retrying", "Pending Queue Slot", "PENDING"])
     ).order_by(PublishingQueue.id.asc()).first()
     
     if not queue_item:
@@ -347,5 +347,8 @@ def process_queue_task(self):
         db.close()
         
     # Queue next task check recursively to support sequential processing of enqueued items
-    process_queue_task.apply_async(countdown=1)
+    try:
+        process_queue_task.apply_async(countdown=1)
+    except Exception as err:
+        logger.warning(f"[Celery Worker] Celery async trigger fallback: {err}")
     return {"status": "completed"}
