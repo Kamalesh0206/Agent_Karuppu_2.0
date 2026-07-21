@@ -193,10 +193,16 @@ const DashboardLayout = () => {
           <div className="flex-1">
             <Routes>
               <Route path="/" element={<Dashboard />} />
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/publish" element={<Dashboard />} />
               <Route path="/accounts" element={<Accounts />} />
+              <Route path="/groups" element={<Accounts />} />
               <Route path="/history" element={<PublishingHistory />} />
+              <Route path="/publishing/history" element={<PublishingHistory />} />
               <Route path="/logs" element={<Logs />} />
+              <Route path="/audit-logs" element={<Logs />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/users" element={isAdmin ? <UserManagement /> : <Navigate to="/" replace />} />
               <Route path="/admin/users" element={isAdmin ? <UserManagement /> : <Navigate to="/" replace />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
