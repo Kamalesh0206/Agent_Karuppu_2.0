@@ -8,10 +8,10 @@ const sanitizeStoredApiUrl = () => {
     if (stored) {
       const lower = stored.toLowerCase().trim();
       if (
-        lower.includes('api.thenexrevo.com') ||
         lower.includes('netlify') || 
         lower.includes('agentkaruppu') || 
-        lower.includes('onrender.com')
+        lower.includes('onrender.com') ||
+        lower.includes('thenexrevo.com') && !lower.includes('api.thenexrevo.com')
       ) {
         console.log("[Config] Automatically purged legacy custom_api_url from localStorage:", stored);
         localStorage.removeItem("custom_api_url");
@@ -25,7 +25,8 @@ const sanitizeStoredApiUrl = () => {
 // Run startup cleanup immediately
 sanitizeStoredApiUrl();
 
-export const PRIMARY_BACKEND_URL = "https://thenexrevo.com";
+export const PRIMARY_BACKEND_URL = "https://api.thenexrevo.com";
+export const PRIMARY_FRONTEND_URL = "https://www.thenexrevo.com";
 
 export const getApiUrl = (): string => {
   if (typeof window !== 'undefined') {
@@ -36,8 +37,8 @@ export const getApiUrl = (): string => {
     }
 
     const metaEnv = (import.meta as any).env || {};
-    // 2. Explicit Environment Variable (VITE_API_BASE, VITE_API_URL, VITE_API_BASE_URL, API_BASE_URL)
-    const envUrl = metaEnv.VITE_API_BASE || metaEnv.VITE_API_URL || metaEnv.VITE_API_BASE_URL || metaEnv.API_BASE_URL;
+    // 2. Explicit Environment Variable (VITE_API_BASE_URL, VITE_API_BASE, VITE_API_URL, API_BASE_URL, BACKEND_URL)
+    const envUrl = metaEnv.VITE_API_BASE_URL || metaEnv.VITE_API_BASE || metaEnv.VITE_API_URL || metaEnv.API_BASE_URL || metaEnv.BACKEND_URL || metaEnv.NEXT_PUBLIC_API_URL || metaEnv.REACT_APP_API_URL;
     if (envUrl && envUrl.trim()) {
       return envUrl.trim().replace(/\/$/, '');
     }
@@ -48,7 +49,7 @@ export const getApiUrl = (): string => {
       return "http://localhost:8000";
     }
 
-    // 4. Single Unified Production API Base URL (https://thenexrevo.com)
+    // 4. Production API Base URL (https://api.thenexrevo.com)
     return PRIMARY_BACKEND_URL;
   }
 
@@ -71,6 +72,11 @@ export const setCustomApiUrl = (newUrl: string) => {
 };
 
 export const isFrontendUrl = (url: string): boolean => {
+  if (!url) return false;
+  const normalized = url.toLowerCase().trim();
+  if (normalized === 'https://www.thenexrevo.com' || normalized === 'https://thenexrevo.com') {
+    return true;
+  }
   return false;
 };
 
@@ -108,9 +114,10 @@ export const validateBackendHealth = async (targetUrl: string): Promise<{ valid:
 export const API_URL = getApiUrl();
 export const API_BASE = API_URL;
 export const WS_URL = API_URL.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
-export const APP_URL = typeof window !== 'undefined' ? window.location.origin : "https://thenexrevo.com";
+export const APP_URL = typeof window !== 'undefined' ? window.location.origin : PRIMARY_FRONTEND_URL;
 export const REGISTRATION_URL = `${APP_URL}/signup`;
 export const LOGIN_URL = `${APP_URL}/login`;
+
 
 
 
