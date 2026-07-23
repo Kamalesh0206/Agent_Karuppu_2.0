@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = "placeholder-gemini-key"
     
     # Instagram Static Server Configuration
-    PUBLIC_URL_PREFIX: str = "https://api.thenexrevo.com/static/uploads"
+    PUBLIC_URL_PREFIX: str = "https://thenexrevo.com/static/uploads"
     
     # Default Admin Credentials
     ADMIN_USERNAME: str = "admin"
@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     FACEBOOK_REDIRECT_URI: str = "https://thenexrevo.com/auth/facebook/callback"
     
     # Frontend URL — used by OAuth callback redirects (must match where the React app is deployed)
-    FRONTEND_URL: str = "http://localhost:3000"
+    FRONTEND_URL: str = "https://thenexrevo.com"
 
     # AWS S3 Storage Settings
     AWS_ACCESS_KEY_ID: str = ""

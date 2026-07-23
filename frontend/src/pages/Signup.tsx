@@ -50,7 +50,7 @@ export default function Signup() {
     }
 
     if (isFrontendUrl(API_URL)) {
-      setError("Incorrect API Server URL. You are pointing to the frontend static application instead of your FastAPI backend server (https://api.thenexrevo.com). Please verify your backend server URL below.");
+      setError("Incorrect API Server URL. You are pointing to the frontend static application instead of your FastAPI backend server (https://thenexrevo.com). Please verify your backend server URL below.");
       setShowApiConfig(true);
       return;
     }
@@ -116,7 +116,7 @@ export default function Signup() {
         (err.response && typeof err.response.data === 'string' && (err.response.data.includes('<!DOCTYPE') || err.response.data.includes('<html')));
 
       if (isHtmlResponse) {
-        msg = "Incorrect API Server URL. You are pointing to the frontend static application instead of your FastAPI backend server (https://api.thenexrevo.com). Please enter your actual FastAPI backend server URL below.";
+        msg = "Incorrect API Server URL. You are pointing to the frontend static application instead of your FastAPI backend server (https://thenexrevo.com). Please enter your actual FastAPI backend server URL below.";
         setShowApiConfig(true);
       } else if (detail) {
         msg = detail;
@@ -184,7 +184,7 @@ export default function Signup() {
                 type="text"
                 value={customUrlInput}
                 onChange={(e) => setCustomUrlInput(e.target.value)}
-                placeholder="https://api.thenexrevo.com or http://127.0.0.1:8000"
+                placeholder="https://thenexrevo.com or http://127.0.0.1:8000"
                 className="flex-1 px-3 py-2 text-xs rounded-xl bg-slate-900 border border-slate-800 text-slate-200 outline-none focus:border-purple-500 font-mono"
               />
               <button
