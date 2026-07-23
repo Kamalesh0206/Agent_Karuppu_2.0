@@ -326,18 +326,55 @@ def api_version():
 
 # --- Authentication Routes ---
 
+@app.get("/login")
+@app.get("/auth/login")
+@app.get("/api/login")
+@app.get("/api/auth/login")
+@app.get("/token")
+@app.get("/api/token")
+def login_get_redirect(request: Request):
+    """
+    Handles browser GET requests to login endpoints.
+    Redirects browser GET traffic to the SPA frontend login page instead of returning 404 Not Found.
+    If requested via JSON API (Accept: application/json), returns HTTP 405 Method Not Allowed explaining that POST is required.
+    """
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    frontend_url = settings.FRONTEND_URL.rstrip("/")
+    accept = request.headers.get("accept", "").lower()
+    
+    logger.info(f"[Auth GET] Direct GET access to login endpoint from {client_ip}. Redirecting to frontend: {frontend_url}/login")
+    
+    if "application/json" in accept and "text/html" not in accept:
+        return JSONResponse(
+            status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+            content={
+                "detail": "Method Not Allowed. Authentication requires HTTP POST with JSON body containing 'username' and 'password'.",
+                "frontend_login": f"{frontend_url}/login",
+                "documentation": "/docs"
+            }
+        )
+    return RedirectResponse(url=f"{frontend_url}/login", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
 @app.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 @app.post("/auth/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 @app.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@app.post("/api/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@app.post("/api/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@app.post("/api/auth/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def signup(user_data: UserCreate, request: Request, db: Session = Depends(get_db)):
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    logger.info(f"[Auth Signup Attempt] Username: {user_data.username} | IP: {client_ip}")
+
     email_val = user_data.email.strip() if user_data.email and user_data.email.strip() else None
     mobile_val = user_data.mobile_number.strip() if user_data.mobile_number and user_data.mobile_number.strip() else None
 
     if not email_val and not mobile_val:
+        logger.warning(f"[Auth Signup Failure] Username: {user_data.username} | Missing email and mobile")
         raise HTTPException(status_code=400, detail="Either email or mobile number must be provided.")
         
     existing_username = db.query(User).filter(User.username == user_data.username).first()
     if existing_username:
+        logger.warning(f"[Auth Signup Failure] Username: {user_data.username} already registered")
         raise HTTPException(status_code=400, detail="Username already registered.")
         
     new_user = User(
@@ -356,7 +393,6 @@ def signup(user_data: UserCreate, request: Request, db: Session = Depends(get_db
     db.commit()
     db.refresh(new_user)
 
-    client_ip = request.client.host if request.client else "127.0.0.1"
     create_audit_log(
         db=db,
         action="User Action",
@@ -364,20 +400,46 @@ def signup(user_data: UserCreate, request: Request, db: Session = Depends(get_db
         user_id=new_user.id,
         ip_address=client_ip
     )
+    logger.info(f"[Auth Signup Success] User registered: {new_user.username} (ID: {new_user.id}) | Status: Pending Approval")
     return new_user
+
+@app.get("/signup")
+@app.get("/register")
+@app.get("/auth/register")
+@app.get("/api/signup")
+@app.get("/api/register")
+@app.get("/api/auth/register")
+def signup_get_redirect(request: Request):
+    frontend_url = settings.FRONTEND_URL.rstrip("/")
+    accept = request.headers.get("accept", "").lower()
+    if "application/json" in accept and "text/html" not in accept:
+        return JSONResponse(
+            status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+            content={
+                "detail": "Method Not Allowed. Registration requires HTTP POST with user parameters.",
+                "frontend_signup": f"{frontend_url}/signup"
+            }
+        )
+    return RedirectResponse(url=f"{frontend_url}/signup", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 @app.post("/login", response_model=Token)
 @app.post("/auth/login", response_model=Token)
+@app.post("/api/login", response_model=Token)
+@app.post("/api/auth/login", response_model=Token)
+@app.post("/token", response_model=Token)
+@app.post("/api/token", response_model=Token)
 def login(login_data: UserLogin, request: Request, db: Session = Depends(get_db)):
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    logger.info(f"[Auth Login Attempt] Target: {login_data.username} | IP: {client_ip}")
+
     user = db.query(User).filter(
         (User.username == login_data.username) | 
         (User.email == login_data.username) | 
         (User.mobile_number == login_data.username)
     ).first()
 
-    client_ip = request.client.host if request.client else "127.0.0.1"
-
     if not user or not verify_password(login_data.password, user.password_hash):
+        logger.warning(f"[Auth Login Failure] Failed login attempt for: {login_data.username} | IP: {client_ip}")
         create_audit_log(
             db=db,
             action="Failures",
@@ -390,21 +452,25 @@ def login(login_data: UserLogin, request: Request, db: Session = Depends(get_db)
         )
 
     if user.status == "Pending Approval":
+        logger.warning(f"[Auth Login Blocked] User: {user.username} | Account Pending Approval")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Your account is awaiting administrator approval."
         )
     elif user.status == "Rejected":
+        logger.warning(f"[Auth Login Blocked] User: {user.username} | Account Rejected")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Your registration has been rejected."
         )
     elif user.status == "Disabled":
+        logger.warning(f"[Auth Login Blocked] User: {user.username} | Account Disabled")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Your account has been disabled."
         )
     elif user.status == "Suspended":
+        logger.warning(f"[Auth Login Blocked] User: {user.username} | Account Suspended")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Your account has been temporarily suspended."
@@ -432,6 +498,7 @@ def login(login_data: UserLogin, request: Request, db: Session = Depends(get_db)
         user_id=user.id,
         ip_address=client_ip
     )
+    logger.info(f"[Auth Login Success] User: {user.username} (Role: {user.role}, ID: {user.id}) | IP: {client_ip}")
 
     return {
         "access_token": access_token,
@@ -441,7 +508,24 @@ def login(login_data: UserLogin, request: Request, db: Session = Depends(get_db)
         "status": user.status
     }
 
+@app.get("/auth/verify")
+@app.get("/api/auth/verify")
+@app.post("/auth/verify")
+@app.post("/api/auth/verify")
+def verify_current_token(current_user: User = Depends(get_current_user)):
+    """Verifies that the provided JWT token is valid and active."""
+    return {
+        "valid": True,
+        "id": current_user.id,
+        "username": current_user.username,
+        "role": current_user.role,
+        "status": current_user.status
+    }
+
 @app.post("/logout")
+@app.post("/auth/logout")
+@app.post("/api/logout")
+@app.post("/api/auth/logout")
 def logout(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     """
     Revokes the current JWT access token. 
@@ -454,7 +538,7 @@ def logout(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
         user_id = db_token.user_id
         db_token.is_revoked = True
         db.commit()
-        logger.info(f"[Logout] User ID {user_id} logged out successfully. JWT revoked. Instagram accounts preserved.")
+        logger.info(f"[Logout] User ID {user_id} logged out successfully. JWT revoked.")
     else:
         logger.warning("[Logout] Logout called with unknown or already-revoked token.")
     
@@ -466,9 +550,12 @@ def logout(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     )
     return {"detail": "Successfully logged out"}
 
-# --- Facebook Login / OAuth Routes ---
+# --- Facebook / Google OAuth Routes ---
 
 @app.get("/login/facebook")
+@app.get("/auth/facebook")
+@app.get("/api/login/facebook")
+@app.get("/api/auth/facebook")
 def login_facebook(request: Request, token: Optional[str] = None):
     """
     Redirects the user to Facebook OAuth login dialog.
@@ -478,7 +565,6 @@ def login_facebook(request: Request, token: Optional[str] = None):
     import urllib.parse
     scope = "instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement,business_management"
     
-    # Extract JWT from Authorization header or query param for state binding
     auth_header = request.headers.get("Authorization", "")
     jwt_token = ""
     if auth_header.startswith("Bearer "):
@@ -486,10 +572,8 @@ def login_facebook(request: Request, token: Optional[str] = None):
     elif token:
         jwt_token = token
     
-    # Encode state as: jwt_token (so callback can identify the user)
     state_value = urllib.parse.quote(jwt_token) if jwt_token else ""
     
-    # If no Client ID configured, redirect back with mock code directly
     if not settings.FACEBOOK_CLIENT_ID:
         mock_callback_url = f"{settings.FACEBOOK_REDIRECT_URI}?code=mock_authorization_code&state={state_value}"
         logger.info("[OAuth] No Facebook Client ID configured. Redirecting to mock callback.")
@@ -503,11 +587,34 @@ def login_facebook(request: Request, token: Optional[str] = None):
         f"&response_type=code"
         f"&state={state_value}"
     )
-    logger.info(f"[OAuth] Redirecting to Facebook OAuth dialog. State set.")
+    logger.info(f"[OAuth] Redirecting to Facebook OAuth dialog.")
     return RedirectResponse(fb_auth_url)
 
+@app.get("/login/google")
+@app.get("/auth/google")
+@app.get("/api/login/google")
+@app.get("/api/auth/google")
+def login_google(request: Request):
+    """Placeholder/compatibility endpoint for Google OAuth login."""
+    frontend_url = settings.FRONTEND_URL.rstrip("/")
+    logger.info("[OAuth Google] Google OAuth request received. Facebook/Instagram OAuth is active suite.")
+    return RedirectResponse(url=f"{frontend_url}/login?oauth_info=Google+OAuth+configured+via+Facebook/Instagram+suite", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+@app.get("/oauth/google/callback")
+@app.get("/auth/google/callback")
+@app.get("/api/oauth/google/callback")
+def oauth_google_callback(request: Request):
+    """Placeholder/compatibility callback for Google OAuth."""
+    frontend_url = settings.FRONTEND_URL.rstrip("/")
+    return RedirectResponse(url=f"{frontend_url}/accounts?status=warning&message=Google+OAuth+callback+received", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
 @app.get("/oauth/callback")
+@app.get("/auth/facebook/callback")
+@app.get("/auth/callback")
+@app.get("/api/oauth/callback")
+@app.get("/api/auth/facebook/callback")
 def oauth_callback(code: str, request: Request, db: Session = Depends(get_db), state: Optional[str] = None):
+
     """
     Handles the Facebook OAuth callback.
     

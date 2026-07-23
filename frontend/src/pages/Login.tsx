@@ -38,6 +38,14 @@ export default function Login() {
     setHealthTesting(false);
   };
 
+  React.useEffect(() => {
+    // If token exists, auto-navigate to dashboard
+    const existingToken = localStorage.getItem("token");
+    if (existingToken) {
+      navigate("/", { replace: true });
+    }
+  }, [navigate]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username || !password) {
@@ -54,29 +62,52 @@ export default function Login() {
     setError('');
     setLoading(true);
 
-    try {
-      console.log(`[Auth Login] Initiating POST request to ${API_URL}/login`, { username });
-      const response = await axios.post(`${API_URL}/login`, {
-        username,
-        password
-      }, {
-        headers: { Accept: 'application/json' }
-      });
+    const loginEndpoints = [
+      `${API_URL}/login`,
+      `${API_URL}/auth/login`,
+      `${API_URL}/api/login`
+    ];
 
-      // HTML response check
-      if (typeof response.data === 'string' && (response.data.includes('<!DOCTYPE') || response.data.includes('<html'))) {
-        throw new Error("HTML_RESPONSE_DETECTED");
+    let response: any = null;
+    let lastErr: any = null;
+
+    for (const endpoint of loginEndpoints) {
+      try {
+        console.log(`[Auth Login] Initiating POST request to ${endpoint}`, { username });
+        const res = await axios.post(endpoint, {
+          username: username.trim(),
+          password
+        }, {
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          timeout: 15000
+        });
+
+        if (typeof res.data === 'string' && (res.data.includes('<!DOCTYPE') || res.data.includes('<html'))) {
+          throw new Error("HTML_RESPONSE_DETECTED");
+        }
+
+        response = res;
+        break; // Successfully authenticated!
+      } catch (err: any) {
+        lastErr = err;
+        // If 404, try next fallback endpoint. If 401, 403, 500, break loop to show actual status.
+        if (err.response?.status !== 404) {
+          break;
+        }
       }
+    }
 
+    if (response && response.data) {
       console.log("[Auth Login] Login successful:", response.data);
       const { access_token, role, status } = response.data;
       localStorage.setItem("token", access_token);
-      localStorage.setItem("username", username);
+      localStorage.setItem("username", username.trim());
       localStorage.setItem("role", role);
       localStorage.setItem("status", status);
 
       navigate("/");
-    } catch (err: any) {
+    } else {
+      const err = lastErr || {};
       console.error("[Auth Login Error] Detailed diagnostic info:", {
         url: `${API_URL}/login`,
         status: err.response?.status,
@@ -111,9 +142,9 @@ export default function Login() {
       }
 
       setError(msg);
-    } finally {
-      setLoading(false);
     }
+
+    setLoading(false);
   };
 
   return (

@@ -40,11 +40,11 @@ export const getApiUrl = (): string => {
       return "http://localhost:8000";
     }
 
-    // 4. Default Production Target (Render Live FastAPI Backend)
-    return "https://agent-karuppu-2-0-2.onrender.com";
+    // 4. Primary Production API Domain (api.thenexrevo.com)
+    return "https://api.thenexrevo.com";
   }
 
-  return "https://agent-karuppu-2-0-2.onrender.com";
+  return "https://api.thenexrevo.com";
 };
 
 export const setCustomApiUrl = (newUrl: string) => {
@@ -117,4 +117,9 @@ export const validateBackendHealth = async (targetUrl: string): Promise<{ valid:
 };
 
 export const API_URL = getApiUrl();
+export const API_BASE = API_URL;
 export const WS_URL = API_URL.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
+export const APP_URL = typeof window !== 'undefined' ? window.location.origin : "https://thenexrevo.com";
+export const REGISTRATION_URL = `${APP_URL}/signup`;
+export const LOGIN_URL = `${APP_URL}/login`;
+

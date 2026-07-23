@@ -58,26 +58,49 @@ export default function Signup() {
     setError('');
     setLoading(true);
 
-    try {
-      console.log(`[Auth Registration] Initiating POST request to ${API_URL}/signup`, { username, fullName, email, mobileNumber });
-      const response = await axios.post(`${API_URL}/signup`, {
-        full_name: fullName,
-        email: email || null,
-        mobile_number: mobileNumber || null,
-        username,
-        password
-      }, {
-        headers: { Accept: 'application/json' }
-      });
+    const signupEndpoints = [
+      `${API_URL}/signup`,
+      `${API_URL}/auth/register`,
+      `${API_URL}/register`
+    ];
 
-      if (typeof response.data === 'string' && (response.data.includes('<!DOCTYPE') || response.data.includes('<html'))) {
-        throw new Error("HTML_RESPONSE_DETECTED");
+    let response: any = null;
+    let lastErr: any = null;
+
+    for (const endpoint of signupEndpoints) {
+      try {
+        console.log(`[Auth Registration] Initiating POST request to ${endpoint}`, { username, fullName, email, mobileNumber });
+        const res = await axios.post(endpoint, {
+          full_name: fullName.trim(),
+          email: email ? email.trim() : null,
+          mobile_number: mobileNumber ? mobileNumber.trim() : null,
+          username: username.trim(),
+          password
+        }, {
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          timeout: 15000
+        });
+
+        if (typeof res.data === 'string' && (res.data.includes('<!DOCTYPE') || res.data.includes('<html'))) {
+          throw new Error("HTML_RESPONSE_DETECTED");
+        }
+
+        response = res;
+        break; // Success!
+      } catch (err: any) {
+        lastErr = err;
+        if (err.response?.status !== 404) {
+          break;
+        }
       }
+    }
 
+    if (response && response.data) {
       console.log("[Auth Registration] Registration successful.");
       setSuccess(true);
-      setTimeout(() => navigate('/login'), 4000);
-    } catch (err: any) {
+      setTimeout(() => navigate('/login'), 3500);
+    } else {
+      const err = lastErr || {};
       console.error("[Auth Registration Error] Detailed diagnostic info:", {
         url: `${API_URL}/signup`,
         status: err.response?.status,
@@ -110,9 +133,9 @@ export default function Signup() {
       }
 
       setError(msg);
-    } finally {
-      setLoading(false);
     }
+
+    setLoading(false);
   };
 
   return (
