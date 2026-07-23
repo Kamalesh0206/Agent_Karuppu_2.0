@@ -38,6 +38,11 @@ from .s3 import upload_file_to_s3
 from .supabase_storage import upload_to_supabase_storage
 
 import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
 logger = logging.getLogger("main_app")
 
 app = FastAPI(
@@ -438,150 +443,359 @@ def login(login_data: UserLogin, request: Request, db: Session = Depends(get_db)
 
 @app.post("/logout")
 def logout(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    """
+    Revokes the current JWT access token. 
+    IMPORTANT: This does NOT delete any Instagram accounts, groups, or tokens from the database.
+    Only the session JWT is invalidated. All connected accounts remain intact.
+    """
     db_token = db.query(AccessToken).filter(AccessToken.token == token).first()
+    user_id = None
     if db_token:
+        user_id = db_token.user_id
         db_token.is_revoked = True
         db.commit()
+        logger.info(f"[Logout] User ID {user_id} logged out successfully. JWT revoked. Instagram accounts preserved.")
+    else:
+        logger.warning("[Logout] Logout called with unknown or already-revoked token.")
+    
+    create_audit_log(
+        db=db,
+        action="Logout",
+        description="User logged out. JWT revoked. All Instagram accounts and data remain intact in database.",
+        user_id=user_id
+    )
     return {"detail": "Successfully logged out"}
 
 # --- Facebook Login / OAuth Routes ---
 
 @app.get("/login/facebook")
-def login_facebook():
-    """Redirects the user to Facebook OAuth login dialog."""
+def login_facebook(request: Request, token: Optional[str] = None):
+    """
+    Redirects the user to Facebook OAuth login dialog.
+    Passes the user's JWT token as the OAuth `state` parameter so the callback
+    can identify which user triggered the OAuth flow and correctly assign the connected account.
+    """
+    import urllib.parse
     scope = "instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement,business_management"
+    
+    # Extract JWT from Authorization header or query param for state binding
+    auth_header = request.headers.get("Authorization", "")
+    jwt_token = ""
+    if auth_header.startswith("Bearer "):
+        jwt_token = auth_header[7:]
+    elif token:
+        jwt_token = token
+    
+    # Encode state as: jwt_token (so callback can identify the user)
+    state_value = urllib.parse.quote(jwt_token) if jwt_token else ""
+    
+    # If no Client ID configured, redirect back with mock code directly
+    if not settings.FACEBOOK_CLIENT_ID:
+        mock_callback_url = f"{settings.FACEBOOK_REDIRECT_URI}?code=mock_authorization_code&state={state_value}"
+        logger.info("[OAuth] No Facebook Client ID configured. Redirecting to mock callback.")
+        return RedirectResponse(mock_callback_url)
+    
     fb_auth_url = (
-        f"https://www.facebook.com/{settings.FACEBOOK_REDIRECT_URI.split('/')[-1] if not settings.FACEBOOK_CLIENT_ID else settings.GRAPH_API_VERSION}/dialog/oauth"
+        f"https://www.facebook.com/v25.0/dialog/oauth"
         f"?client_id={settings.FACEBOOK_CLIENT_ID}"
-        f"&redirect_uri={settings.FACEBOOK_REDIRECT_URI}"
+        f"&redirect_uri={urllib.parse.quote(settings.FACEBOOK_REDIRECT_URI)}"
         f"&scope={scope}"
         f"&response_type=code"
+        f"&state={state_value}"
     )
-    # If no Client ID configured, redirect back with mock token directly
-    if not settings.FACEBOOK_CLIENT_ID:
-        mock_callback_url = f"{settings.FACEBOOK_REDIRECT_URI}?code=mock_authorization_code"
-        return RedirectResponse(mock_callback_url)
+    logger.info(f"[OAuth] Redirecting to Facebook OAuth dialog. State set.")
     return RedirectResponse(fb_auth_url)
 
 @app.get("/oauth/callback")
-def oauth_callback(code: str, request: Request, db: Session = Depends(get_db)):
-    """Exchanges auth code for Long-lived token, syncs matching IG Business Profile, and registers."""
-    client_ip = request.client.host if request.client else "127.0.0.1"
+def oauth_callback(code: str, request: Request, db: Session = Depends(get_db), state: Optional[str] = None):
+    """
+    Handles the Facebook OAuth callback.
     
+    CRITICAL FIXES:
+    - Decodes the `state` parameter to identify the authenticated user
+    - Uses correct user_id (not hardcoded user_id=1)
+    - Performs UPSERT (INSERT or UPDATE) — no duplicate accounts ever
+    - Sets owner_id, owner_name, linked_by correctly
+    - Redirects to FRONTEND_URL (not hardcoded localhost)
+    - Marks accounts as 'Connected' in DB immediately after commit
+    - Comprehensive audit logging at each step
+    """
+    import urllib.parse
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    frontend_url = settings.FRONTEND_URL.rstrip("/")
+    
+    # --- Resolve the authenticated user from the OAuth state parameter ---
+    resolved_user: Optional[User] = None
+    if state:
+        try:
+            decoded_jwt = urllib.parse.unquote(state)
+            payload = decode_access_token(decoded_jwt)
+            if payload:
+                username = payload.get("username")
+                if username:
+                    db_state_token = db.query(AccessToken).filter(
+                        AccessToken.token == decoded_jwt,
+                        AccessToken.is_revoked == False
+                    ).first()
+                    if db_state_token:
+                        resolved_user = db.query(User).filter(User.username == username).first()
+                        if resolved_user:
+                            logger.info(f"[OAuth Callback] Resolved authenticated user from state: {resolved_user.username} (ID: {resolved_user.id})")
+        except Exception as state_err:
+            logger.warning(f"[OAuth Callback] Could not decode state parameter: {state_err}")
+    
+    # Fallback: use Super Admin (id=1) if state not resolvable
+    # This preserves backwards compatibility for direct OAuth (non-app-initiated)
+    if not resolved_user:
+        resolved_user = db.query(User).filter(User.id == 1).first()
+        logger.warning(f"[OAuth Callback] No valid state parameter found. Falling back to Super Admin (user_id=1). "
+                       f"For proper user binding, trigger OAuth through the app with a valid session.")
+    
+    bound_user_id = resolved_user.id if resolved_user else 1
+    bound_username = resolved_user.username if resolved_user else "admin"
+    bound_fullname = resolved_user.full_name if resolved_user else "Super Admin"
+    
+    # --- MOCK flow (no Facebook Client ID or mock code) ---
     if code == "mock_authorization_code" or not settings.FACEBOOK_CLIENT_ID:
-        # Register a mock profile
-        mock_user_id = 1 # Seeded super admin
-        account = InstagramAccount(
-            user_id=mock_user_id,
-            facebook_user_id="100009876543210",
-            facebook_page_id="10485769213",
-            facebook_page_name="Mock Page Marketing",
-            page_access_token=encrypt_token("mock_long_lived_page_token"),
-            instagram_business_id="17841401234567890",
-            instagram_username="mock_instagram_user",
-            profile_picture="https://placekitten.com/200/200",
-            business_name="Mock IG Business",
-            followers_count=1420,
-            token_expiry=datetime.utcnow() + timedelta(days=60),
-            status="Connected"
-        )
-        db.add(account)
-        db.commit()
+        logger.info(f"[OAuth Callback] Mock OAuth flow triggered for user {bound_username} (ID: {bound_user_id})")
+        mock_ig_biz_id = "17841401234567890"
+        mock_username = "mock_instagram_user"
+        
+        # UPSERT: check if mock account already exists
+        existing_mock = db.query(InstagramAccount).filter(
+            InstagramAccount.instagram_business_id == mock_ig_biz_id
+        ).first()
+        
+        if existing_mock:
+            # UPDATE existing account — do NOT create duplicate
+            existing_mock.user_id = bound_user_id
+            existing_mock.owner_id = bound_user_id
+            existing_mock.owner_name = bound_fullname
+            existing_mock.linked_by = bound_username
+            existing_mock.page_access_token = encrypt_token("mock_long_lived_page_token")
+            existing_mock.token_expiry = datetime.utcnow() + timedelta(days=60)
+            existing_mock.status = "Connected"
+            existing_mock.updated_by = bound_username
+            existing_mock.last_modified_by = bound_username
+            existing_mock.last_modified_at = datetime.utcnow()
+            db.commit()
+            db.refresh(existing_mock)
+            logger.info(f"[OAuth Callback] Mock account UPDATED in DB for user {bound_username}. Account ID: {existing_mock.id}")
+        else:
+            # INSERT new mock account
+            mock_account = InstagramAccount(
+                user_id=bound_user_id,
+                facebook_user_id="100009876543210",
+                facebook_page_id="10485769213",
+                facebook_page_name="Mock Page Marketing",
+                page_access_token=encrypt_token("mock_long_lived_page_token"),
+                instagram_business_id=mock_ig_biz_id,
+                instagram_username=mock_username,
+                profile_picture="https://placekitten.com/200/200",
+                business_name="Mock IG Business",
+                followers_count=1420,
+                token_expiry=datetime.utcnow() + timedelta(days=60),
+                status="Connected",
+                owner_id=bound_user_id,
+                owner_name=bound_fullname,
+                linked_by=bound_username,
+                created_by=bound_username
+            )
+            db.add(mock_account)
+            db.commit()
+            db.refresh(mock_account)
+            logger.info(f"[OAuth Callback] Mock account INSERTED in DB for user {bound_username}. Account ID: {mock_account.id}")
         
         create_audit_log(
             db=db,
             action="OAuth",
-            description=f"Successfully connected mock profile @mock_instagram_user via Facebook Login OAuth.",
-            user_id=mock_user_id,
+            description=f"[OAuth Success] Connected mock profile @{mock_username} for user {bound_username} (ID: {bound_user_id}). DB committed.",
+            user_id=bound_user_id,
             ip_address=client_ip
         )
-        return RedirectResponse("http://localhost:3000/accounts?status=success&username=mock_instagram_user")
+        return RedirectResponse(f"{frontend_url}/accounts?status=success&username={mock_username}")
 
-    # Real Facebook flow
+    # --- REAL Facebook OAuth flow ---
     try:
-        url = "https://graph.facebook.com/v25.0/oauth/access_token"
-        params = {
+        logger.info(f"[OAuth Callback] Starting real OAuth flow for user {bound_username} (ID: {bound_user_id})")
+        
+        # Step 1: Exchange code for short-lived user token
+        token_url = "https://graph.facebook.com/v25.0/oauth/access_token"
+        token_params = {
             "client_id": settings.FACEBOOK_CLIENT_ID,
             "redirect_uri": settings.FACEBOOK_REDIRECT_URI,
             "client_secret": settings.FACEBOOK_CLIENT_SECRET,
             "code": code
         }
-        res = requests.get(url, params=params).json()
-        short_token = res.get("access_token")
+        token_res = requests.get(token_url, params=token_params, timeout=30).json()
+        short_token = token_res.get("access_token")
+        fb_user_id = token_res.get("user_id")
+        
         if not short_token:
-            raise HTTPException(status_code=400, detail="Failed to acquire short-lived user token.")
-
-        # Exchange to Long-lived User Token
+            error_msg = token_res.get("error", {}).get("message", "Unknown error")
+            logger.error(f"[OAuth Callback] Failed to get short-lived token: {error_msg}")
+            create_audit_log(db=db, action="Errors",
+                description=f"[OAuth Failure] Failed to acquire short-lived token for user {bound_username}: {error_msg}",
+                user_id=bound_user_id, ip_address=client_ip)
+            return RedirectResponse(f"{frontend_url}/accounts?status=error&message=Failed+to+acquire+access+token")
+        
+        logger.info(f"[OAuth Callback] Short-lived token acquired. Exchanging for long-lived token...")
+        
+        # Step 2: Exchange for long-lived user token
         long_lived_res = InstagramClient.exchange_short_lived_token(short_token)
         long_user_token = long_lived_res.get("access_token")
         
-        # Get User details and Pages
+        if not long_user_token:
+            logger.error(f"[OAuth Callback] Failed to exchange for long-lived token.")
+            return RedirectResponse(f"{frontend_url}/accounts?status=error&message=Token+exchange+failed")
+        
+        logger.info(f"[OAuth Callback] Long-lived token acquired. Fetching Facebook Pages...")
+        
+        # Step 3: Get linked Facebook Pages
         pages_res = requests.get(
-            f"https://graph.facebook.com/v25.0/me/accounts", 
-            params={"access_token": long_user_token}
+            "https://graph.facebook.com/v25.0/me/accounts",
+            params={"access_token": long_user_token},
+            timeout=30
         ).json()
         
         pages_data = pages_res.get("data", [])
         if not pages_data:
-            raise HTTPException(status_code=400, detail="No managed Facebook pages found linked to this account.")
-
+            logger.warning(f"[OAuth Callback] No managed Facebook pages found for user {bound_username}.")
+            create_audit_log(db=db, action="Errors",
+                description=f"[OAuth Failure] No Facebook Pages found for user {bound_username}.",
+                user_id=bound_user_id, ip_address=client_ip)
+            return RedirectResponse(f"{frontend_url}/accounts?status=error&message=No+Facebook+Pages+found")
+        
+        logger.info(f"[OAuth Callback] Found {len(pages_data)} Facebook page(s). Processing Instagram Business accounts...")
         connected_usernames = []
+        
         for page in pages_data:
             page_id = page.get("id")
-            page_name = page.get("name")
+            page_name = page.get("name", "")
             
-            # Retrieve page token
-            page_token = page.get("access_token")
-            # Exchange page token to long lived page token
-            long_page_token = InstagramClient.get_long_lived_page_token(long_user_token, page_id)
-            
-            # Retrieve Instagram Business ID linked to this Facebook Page
-            ig_res = requests.get(
-                f"https://graph.facebook.com/v25.0/{page_id}",
-                params={
-                    "fields": "id,name,instagram_business_account",
-                    "access_token": long_page_token
-                }
-            ).json()
-            
-            ig_account = ig_res.get("instagram_business_account")
-            if ig_account:
-                ig_id = ig_account.get("id")
-                # Retrieve profile details (followers, name, and profile pictures)
-                profile = InstagramClient.get_instagram_profile_details(ig_id, long_page_token)
+            try:
+                # Get long-lived page-level access token
+                long_page_token = InstagramClient.get_long_lived_page_token(long_user_token, page_id)
                 
-                # Encrypt and save account parameters
-                existing = db.query(InstagramAccount).filter(InstagramAccount.instagram_business_id == ig_id).first()
-                if not existing:
+                # Get Instagram Business Account linked to this Page
+                ig_res = requests.get(
+                    f"https://graph.facebook.com/v25.0/{page_id}",
+                    params={
+                        "fields": "id,name,instagram_business_account",
+                        "access_token": long_page_token
+                    },
+                    timeout=30
+                ).json()
+                
+                ig_account = ig_res.get("instagram_business_account")
+                if not ig_account:
+                    logger.info(f"[OAuth Callback] Page '{page_name}' has no linked Instagram Business Account. Skipping.")
+                    continue
+                
+                ig_id = ig_account.get("id")
+                logger.info(f"[OAuth Callback] Found Instagram Business Account ID: {ig_id} on Page '{page_name}'")
+                
+                # Get full Instagram profile details
+                try:
+                    profile = InstagramClient.get_instagram_profile_details(ig_id, long_page_token)
+                except Exception as profile_err:
+                    logger.warning(f"[OAuth Callback] Could not fetch profile details for IG ID {ig_id}: {profile_err}")
+                    profile = {"username": f"ig_{ig_id}", "profile_picture_url": None, "name": page_name, "followers_count": 0}
+                
+                ig_username = profile.get("username", f"ig_{ig_id}")
+                token_expiry = datetime.utcnow() + timedelta(days=60)
+                
+                # UPSERT: check by instagram_business_id (unique key)
+                existing = db.query(InstagramAccount).filter(
+                    InstagramAccount.instagram_business_id == ig_id
+                ).first()
+                
+                if existing:
+                    # UPDATE existing account — preserve group assignment
+                    logger.info(f"[OAuth Callback] Account @{ig_username} exists (ID: {existing.id}). Updating token and profile...")
+                    existing.user_id = bound_user_id
+                    existing.owner_id = existing.owner_id or bound_user_id  # preserve existing owner unless unset
+                    existing.owner_name = existing.owner_name or bound_fullname
+                    existing.facebook_user_id = fb_user_id or existing.facebook_user_id
+                    existing.facebook_page_id = page_id
+                    existing.facebook_page_name = page_name or existing.facebook_page_name
+                    existing.page_access_token = encrypt_token(long_page_token)
+                    existing.instagram_username = ig_username
+                    existing.profile_picture = profile.get("profile_picture_url") or existing.profile_picture
+                    existing.business_name = profile.get("name") or existing.business_name
+                    existing.followers_count = profile.get("followers_count", existing.followers_count)
+                    existing.token_expiry = token_expiry
+                    existing.status = "Connected"
+                    existing.updated_by = bound_username
+                    existing.last_modified_by = bound_username
+                    existing.last_modified_at = datetime.utcnow()
+                    connected_usernames.append(ig_username)
+                    logger.info(f"[OAuth Callback] [DB UPDATE] Account @{ig_username} token refreshed and status=Connected committed.")
+                else:
+                    # INSERT new account
+                    logger.info(f"[OAuth Callback] Account @{ig_username} is new. Inserting into database...")
                     new_acc = InstagramAccount(
-                        user_id=1,  # Default User
-                        facebook_user_id=res.get("user_id"),
+                        user_id=bound_user_id,
+                        facebook_user_id=fb_user_id,
                         facebook_page_id=page_id,
                         facebook_page_name=page_name,
                         page_access_token=encrypt_token(long_page_token),
                         instagram_business_id=ig_id,
-                        instagram_username=profile.get("username"),
+                        instagram_username=ig_username,
                         profile_picture=profile.get("profile_picture_url"),
-                        business_name=profile.get("name"),
+                        business_name=profile.get("name") or page_name,
                         followers_count=profile.get("followers_count", 0),
-                        token_expiry=datetime.utcnow() + timedelta(days=60),
-                        status="Connected"
+                        token_expiry=token_expiry,
+                        status="Connected",
+                        # Ownership fields — critical for accounts to appear under correct user
+                        owner_id=bound_user_id,
+                        owner_name=bound_fullname,
+                        linked_by=bound_username,
+                        linked_at=datetime.utcnow(),
+                        created_by=bound_username
                     )
                     db.add(new_acc)
-                    connected_usernames.append(profile.get("username"))
-                else:
-                    existing.page_access_token = encrypt_token(long_page_token)
-                    existing.profile_picture = profile.get("profile_picture_url")
-                    existing.business_name = profile.get("name")
-                    existing.followers_count = profile.get("followers_count", 0)
-                    existing.token_expiry = datetime.utcnow() + timedelta(days=60)
-                    existing.status = "Connected"
-                    connected_usernames.append(profile.get("username"))
+                    connected_usernames.append(ig_username)
+                    logger.info(f"[OAuth Callback] [DB INSERT] New account @{ig_username} added. Pending commit.")
+                
+                # Commit each account individually to ensure persistence
+                try:
+                    db.commit()
+                    logger.info(f"[OAuth Callback] [DB COMMIT] Account @{ig_username} successfully committed to database.")
+                    create_audit_log(
+                        db=db,
+                        action="OAuth",
+                        description=f"[OAuth Success] Instagram @{ig_username} (IG ID: {ig_id}) connected by {bound_username}. Token expires: {token_expiry.strftime('%Y-%m-%d')}. DB committed.",
+                        user_id=bound_user_id,
+                        ip_address=client_ip
+                    )
+                except Exception as commit_err:
+                    db.rollback()
+                    logger.error(f"[OAuth Callback] [DB COMMIT FAILED] Failed to commit account @{ig_username}: {commit_err}")
+                    create_audit_log(db=db, action="Errors",
+                        description=f"[OAuth DB Failure] Failed to commit @{ig_username}: {commit_err}",
+                        user_id=bound_user_id, ip_address=client_ip)
+            
+            except Exception as page_err:
+                logger.error(f"[OAuth Callback] Error processing page '{page_name}': {page_err}")
+                continue
         
-        db.commit()
-        return RedirectResponse(f"http://localhost:3000/accounts?status=success&username={','.join(connected_usernames)}")
+        if connected_usernames:
+            logger.info(f"[OAuth Callback] OAuth complete. Connected accounts: {connected_usernames} for user {bound_username}.")
+            return RedirectResponse(
+                f"{frontend_url}/accounts?status=success&username={','.join(connected_usernames)}"
+            )
+        else:
+            logger.warning(f"[OAuth Callback] OAuth completed but no Instagram Business Accounts were found or linked.")
+            return RedirectResponse(f"{frontend_url}/accounts?status=warning&message=No+Instagram+Business+Accounts+found+on+connected+pages")
+    
     except Exception as e:
-        return RedirectResponse(f"http://localhost:3000/accounts?status=error&message={str(e)}")
+        logger.error(f"[OAuth Callback] Unexpected error in OAuth flow for user {bound_username}: {e}", exc_info=True)
+        create_audit_log(db=db, action="Errors",
+            description=f"[OAuth Fatal Error] OAuth flow failed for user {bound_username}: {str(e)}",
+            user_id=bound_user_id, ip_address=client_ip)
+        import urllib.parse as urlparse
+        return RedirectResponse(f"{frontend_url}/accounts?status=error&message={urlparse.quote(str(e)[:200])}")
 
 def check_account_modification_permission(account: InstagramAccount, user: User):
     if user.role in ["Super Admin", "Admin"]:
@@ -599,20 +813,38 @@ def check_account_modification_permission(account: InstagramAccount, user: User)
 @app.get("/api/accounts", response_model=List[InstagramAccountResponse])
 @app.get("/instagram/accounts", response_model=List[InstagramAccountResponse])
 def get_accounts(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    # Synchronize profiles followers counts on loading accounts
+    """
+    Fetch all Instagram accounts from the database.
+    
+    CRITICAL DESIGN DECISIONS:
+    - Database is the single source of truth. Never resets on page refresh or re-login.
+    - Does NOT call Instagram API on every load (removed blocking API calls).
+    - Token status is determined from stored token_expiry date in DB.
+    - Expired tokens mark account as 'Token Expired' — never delete the account.
+    - Accounts persist across logout/login cycles permanently.
+    """
+    now = datetime.utcnow()
     accounts = db.query(InstagramAccount).all()
+    logger.info(f"[Account Fetch] User {current_user.username} fetching accounts. Found {len(accounts)} total accounts in DB.")
+    
+    # Auto-update token expiry status from DB date (no Instagram API call needed)
+    status_updated = False
     for acc in accounts:
+        if acc.token_expiry and acc.token_expiry < now and acc.status == "Connected":
+            # Mark as expired instead of hiding/deleting the account
+            acc.status = "Token Expired"
+            acc.last_modified_at = now
+            status_updated = True
+            logger.info(f"[Account Fetch] Account @{acc.instagram_username} (ID: {acc.id}) token expired on {acc.token_expiry}. Status updated to 'Token Expired'.")
+    
+    if status_updated:
         try:
-            token = decrypt_token(acc.page_access_token)
-            if not InstagramClient.is_mock_token(token):
-                profile = InstagramClient.get_instagram_profile_details(acc.instagram_business_id, token)
-                acc.followers_count = profile.get("followers_count", 0)
-                acc.profile_picture = profile.get("profile_picture_url")
-                acc.business_name = profile.get("name")
-        except Exception:
-            pass
-    db.commit()
-
+            db.commit()
+            logger.info("[Account Fetch] Token expiry statuses committed to DB.")
+        except Exception as commit_err:
+            db.rollback()
+            logger.error(f"[Account Fetch] Failed to commit token expiry updates: {commit_err}")
+    
     is_admin = current_user.role in ["Super Admin", "Admin"]
     
     results = []
@@ -627,7 +859,7 @@ def get_accounts(db: Session = Depends(get_db), current_user: User = Depends(get
             "followers_count": acc.followers_count,
             "status": acc.status,
             "group_id": acc.group_id,
-            "group_name": acc.group.name if acc.group else None,
+            "group_name": acc.group.name if acc.group else acc.group_name,
             "owner_id": acc.owner_id,
             "owner_name": acc.owner_name or (acc.user.full_name if acc.user else "System"),
             "linked_by": acc.linked_by,
@@ -646,6 +878,7 @@ def get_accounts(db: Session = Depends(get_db), current_user: User = Depends(get
         }
         results.append(acc_dict)
 
+    logger.info(f"[Account Fetch] Returning {len(results)} account(s) to user {current_user.username}.")
     return results
 
 @app.post("/accounts/connect", response_model=InstagramAccountResponse)
@@ -658,50 +891,97 @@ def connect_account_manually(
     db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_user)
 ):
-    """Allows manual connection by passing a pre-generated page token and username details."""
-    client_ip = request.client.host if request.client else "127.0.0.1"
+    """
+    Manually connect an Instagram account using a pre-generated Page Access Token.
     
-    # Verify account
+    CRITICAL FIX: Uses UPSERT logic — checks for existing account by instagram_business_id.
+    If found: updates the token and profile. If not: inserts new record.
+    This prevents IntegrityError on duplicate instagram_business_id (unique constraint).
+    """
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    logger.info(f"[Manual Connect] User {current_user.username} connecting account @{acc_data.instagram_username_or_email}")
+    
+    # Verify account and resolve IG business details
     result = InstagramClient.verify_and_resolve_account(
         username=acc_data.instagram_username_or_email,
         access_token=acc_data.access_token,
         facebook_page_id=acc_data.facebook_page_id
     )
     if result["status"] == "rejected":
+        logger.warning(f"[Manual Connect] Verification rejected for @{acc_data.instagram_username_or_email}: {result.get('reason')}")
         raise HTTPException(status_code=400, detail=result.get("reason", "Verification rejected"))
 
-    # Encrypt token
+    ig_biz_id = result["instagram_account_id"]
+    ig_username = result["username"]
     encrypted_token = encrypt_token(acc_data.access_token)
-
+    token_expiry = result.get("token_expiry_time") or (datetime.utcnow() + timedelta(days=60))
+    
+    # UPSERT: check if this Instagram Business Account is already connected
+    existing = db.query(InstagramAccount).filter(
+        InstagramAccount.instagram_business_id == ig_biz_id
+    ).first()
+    
+    if existing:
+        logger.info(f"[Manual Connect] Account @{ig_username} (IG ID: {ig_biz_id}) already exists (DB ID: {existing.id}). Updating token...")
+        existing.page_access_token = encrypted_token
+        existing.facebook_page_id = result.get("facebook_page_id") or existing.facebook_page_id
+        existing.facebook_page_name = result.get("business_name") or existing.facebook_page_name
+        existing.instagram_username = ig_username
+        existing.profile_picture = result.get("profile_picture") or existing.profile_picture
+        existing.business_name = result.get("business_name") or existing.business_name
+        existing.followers_count = result.get("followers_count", existing.followers_count)
+        existing.token_expiry = token_expiry
+        existing.status = "Connected"
+        existing.updated_by = current_user.username
+        existing.last_modified_by = current_user.username
+        existing.last_modified_at = datetime.utcnow()
+        try:
+            db.commit()
+            db.refresh(existing)
+            logger.info(f"[Manual Connect] [DB UPDATE] Account @{ig_username} token updated. DB committed.")
+            create_audit_log(db=db, action="User Action",
+                description=f"[Token Refresh] {current_user.username} refreshed token for @{ig_username} via manual connect. Status: Connected.",
+                user_id=current_user.id, ip_address=client_ip)
+        except Exception as e:
+            db.rollback()
+            logger.error(f"[Manual Connect] DB commit failed for @{ig_username}: {e}")
+            raise HTTPException(status_code=500, detail=f"Database error updating account: {str(e)}")
+        return existing
+    
+    # INSERT new account
+    logger.info(f"[Manual Connect] Account @{ig_username} is new. Inserting into database...")
     new_acc = InstagramAccount(
         user_id=current_user.id,
-        facebook_page_id=result["facebook_page_id"],
+        facebook_page_id=result.get("facebook_page_id"),
         facebook_page_name=result.get("business_name") or "Manual Connected Page",
         page_access_token=encrypted_token,
-        instagram_business_id=result["instagram_account_id"],
-        instagram_username=result["username"],
+        instagram_business_id=ig_biz_id,
+        instagram_username=ig_username,
         profile_picture=result.get("profile_picture") or "https://placekitten.com/200/200",
         business_name=result.get("business_name") or "Manual Business",
         followers_count=result.get("followers_count", 0),
-        token_expiry=result["token_expiry_time"],
+        token_expiry=token_expiry,
         status="Connected",
         # Ownership fields
         owner_id=current_user.id,
         owner_name=current_user.full_name,
         linked_by=current_user.username,
+        linked_at=datetime.utcnow(),
         created_by=current_user.username
     )
     db.add(new_acc)
-    db.commit()
-    db.refresh(new_acc)
-
-    create_audit_log(
-        db=db,
-        action="User Action",
-        description=f"{current_user.username} linked @{new_acc.instagram_username}",
-        user_id=current_user.id,
-        ip_address=client_ip
-    )
+    try:
+        db.commit()
+        db.refresh(new_acc)
+        logger.info(f"[Manual Connect] [DB INSERT] Account @{ig_username} committed. DB ID: {new_acc.id}")
+        create_audit_log(db=db, action="User Action",
+            description=f"[Account Connected] {current_user.username} manually connected @{ig_username} (IG ID: {ig_biz_id}). Token expires: {token_expiry}. DB committed.",
+            user_id=current_user.id, ip_address=client_ip)
+    except Exception as e:
+        db.rollback()
+        logger.error(f"[Manual Connect] [DB INSERT FAILED] Failed to commit new account @{ig_username}: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error saving account: {str(e)}")
+    
     return new_acc
 
 @app.put("/accounts/{id}", response_model=InstagramAccountResponse)
@@ -790,6 +1070,85 @@ def delete_account(id: int, request: Request, db: Session = Depends(get_db), cur
         ip_address=client_ip
     )
     return {"detail": "Instagram profile successfully disconnected."}
+
+@app.post("/accounts/{id}/sync")
+@app.post("/api/accounts/{id}/sync")
+def sync_account_profile(id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """
+    On-demand sync of an Instagram account's live profile data from the Instagram Graph API.
+    
+    This is intentionally separate from GET /accounts to avoid blocking the accounts list load.
+    Users can trigger this manually per account to refresh follower count, profile picture, etc.
+    If the token is expired, marks the account as 'Token Expired' and returns an error message.
+    Account is NEVER deleted — always preserved in the database.
+    """
+    acc = db.query(InstagramAccount).filter(InstagramAccount.id == id).first()
+    if not acc:
+        raise HTTPException(status_code=404, detail="Instagram profile not found.")
+    
+    logger.info(f"[Account Sync] User {current_user.username} triggering sync for @{acc.instagram_username} (ID: {id})")
+    
+    try:
+        token = decrypt_token(acc.page_access_token)
+        
+        if InstagramClient.is_mock_token(token):
+            logger.info(f"[Account Sync] @{acc.instagram_username} uses mock token. Skipping live sync.")
+            return {
+                "status": "skipped",
+                "message": "Mock account — no live sync needed.",
+                "instagram_username": acc.instagram_username,
+                "followers_count": acc.followers_count
+            }
+        
+        profile = InstagramClient.get_instagram_profile_details(acc.instagram_business_id, token)
+        
+        acc.followers_count = profile.get("followers_count", acc.followers_count)
+        acc.profile_picture = profile.get("profile_picture_url") or acc.profile_picture
+        acc.business_name = profile.get("name") or acc.business_name
+        acc.instagram_username = profile.get("username") or acc.instagram_username
+        
+        # If sync succeeded, token is still valid — ensure status is Connected
+        if acc.status == "Token Expired":
+            acc.status = "Connected"
+            logger.info(f"[Account Sync] @{acc.instagram_username} token valid. Status restored to Connected.")
+        
+        acc.updated_by = current_user.username
+        acc.last_modified_at = datetime.utcnow()
+        db.commit()
+        logger.info(f"[Account Sync] @{acc.instagram_username} synced successfully. Followers: {acc.followers_count}")
+        
+        return {
+            "status": "synced",
+            "instagram_username": acc.instagram_username,
+            "followers_count": acc.followers_count,
+            "profile_picture": acc.profile_picture,
+            "business_name": acc.business_name,
+            "account_status": acc.status
+        }
+    
+    except Exception as e:
+        # Token may be invalid/expired — mark as expired, DO NOT delete account
+        logger.warning(f"[Account Sync] @{acc.instagram_username} sync failed (likely expired token): {e}")
+        now = datetime.utcnow()
+        
+        if acc.token_expiry and acc.token_expiry < now:
+            acc.status = "Token Expired"
+            acc.last_modified_at = now
+            try:
+                db.commit()
+                logger.info(f"[Account Sync] @{acc.instagram_username} marked as 'Token Expired' in DB.")
+            except Exception as commit_err:
+                db.rollback()
+                logger.error(f"[Account Sync] Failed to commit Token Expired status: {commit_err}")
+        
+        create_audit_log(db=db, action="Errors",
+            description=f"[Sync Failed] Sync failed for @{acc.instagram_username}: {str(e)[:200]}",
+            user_id=current_user.id)
+        
+        raise HTTPException(
+            status_code=400,
+            detail=f"Sync failed for @{acc.instagram_username}: {str(e)[:200]}. Token may be expired — please reconnect."
+        )
 
 # --- Group Management Routes ---
 

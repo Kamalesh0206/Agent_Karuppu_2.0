@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { API_URL } from '../config.ts';
 import { 
   Key, Trash2, AlertTriangle, Plus, X, Folder, Edit3, ChevronDown, ChevronRight, 
   Settings as SettingsIcon, List, FileText, CheckCircle2, RefreshCw, EyeOff, Globe, Move, Link as LinkIcon, ShieldAlert,
-  BarChart3, Users, Search, Filter, User as UserIcon, Lock, Shield, Share2, ExternalLink, Send
+  BarChart3, Users, Search, Filter, User as UserIcon, Lock, Shield, Share2, ExternalLink, Send, Zap, WifiOff, Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import GroupTokenManager from '../components/GroupTokenManager';
@@ -60,11 +61,15 @@ interface HistoryItem {
 }
 
 export default function Accounts() {
+  const location = useLocation();
   const [accounts, setAccounts] = useState<InstagramAccount[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  
+  // OAuth callback result notification
+  const [oauthMessage, setOauthMessage] = useState<{ type: 'success' | 'error' | 'warning', text: string } | null>(null);
   
   // RBAC User profile context
   const [userProfile, setUserProfile] = useState<{ id: number, role: string, username: string } | null>(null);
@@ -127,6 +132,200 @@ export default function Accounts() {
   const [editPageId, setEditPageId] = useState('');
   const [editSubmitting, setEditSubmitting] = useState(false);
 
+  // Per-account on-demand sync state
+  const [syncingAccId, setSyncingAccId] = useState<number | null>(null);
+
+
+  // -----------------------------------------------------------------------
+  // TOKEN STATUS HELPER
+  // Determines display status from DB token_expiry without calling Instagram API
+  // -----------------------------------------------------------------------
+  const getTokenStatusBadge = (acc: InstagramAccount) => {
+    if (acc.status === 'Token Expired') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-bold">
+          <WifiOff size={9} /> Token Expired
+        </span>
+      );
+    }
+    if (!acc.token_expiry) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-700/50 border border-slate-600 text-slate-400 text-[10px] font-bold">
+          <Clock size={9} /> No Expiry Set
+        </span>
+      );
+    }
+    const now = new Date();
+    const expiry = new Date(acc.token_expiry);
+    const diffDays = Math.ceil((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    if (diffDays <= 0) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-bold">
+          <WifiOff size={9} /> Token Expired
+        </span>
+      );
+    }
+    if (diffDays <= 7) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-bold">
+          <AlertTriangle size={9} /> Expires in {diffDays}d
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-500/10 border border-green-500/20 text-green-400 text-[10px] font-bold">
+        <CheckCircle2 size={9} /> Active
+      </span>
+    );
+  };
+
+  // -----------------------------------------------------------------------
+  // DATA FETCHING — Database is the single source of truth
+  // fetchAccounts NEVER resets accounts to [] on failure — preserves existing data
+  // -----------------------------------------------------------------------
+
+  const fetchProfile = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/profile`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
+      });
+      setUserProfile(response.data);
+    } catch (err) {
+      console.error("[Accounts] Profile fetch error:", err);
+    }
+  };
+
+  useEffect(() => {
+    // Process OAuth callback query params BEFORE initial data load
+    // This handles the redirect back from Facebook/Instagram OAuth
+    const params = new URLSearchParams(location.search);
+    const oauthStatus = params.get('status');
+    const oauthUsername = params.get('username');
+    const oauthMessage_ = params.get('message');
+    
+    if (oauthStatus === 'success' && oauthUsername) {
+      const usernames = oauthUsername.split(',').join(', @');
+      setOauthMessage({
+        type: 'success',
+        text: `✅ Successfully connected Instagram account(s): @${usernames}. Accounts have been saved to the database and will persist across sessions.`
+      });
+      // Clean the URL without reloading
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (oauthStatus === 'error') {
+      setOauthMessage({
+        type: 'error',
+        text: `❌ OAuth connection failed: ${oauthMessage_ || 'Unknown error. Please try again.'}`
+      });
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (oauthStatus === 'warning') {
+      setOauthMessage({
+        type: 'warning',
+        text: `⚠️ OAuth completed but: ${oauthMessage_ || 'No Instagram Business Accounts found on connected pages.'}`
+      });
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+    
+    fetchInitialData();
+  }, []);
+
+  /**
+   * Loads all data independently so one failure doesn't wipe other data.
+   * Accounts are ALWAYS loaded from the backend database — never from localStorage.
+   * On page refresh, this re-fetches from the API and re-renders the UI.
+   * On re-login, the same function is called again — accounts remain in DB.
+   */
+  const fetchInitialData = async () => {
+    setLoading(true);
+    
+    // Run fetches independently — a failed groups fetch won't prevent accounts from loading
+    const results = await Promise.allSettled([
+      fetchProfile(),
+      fetchGroups(),
+      fetchAccounts(),
+      fetchHistoryLogs()
+    ]);
+    
+    // Report errors individually without clearing account data
+    const errors: string[] = [];
+    if (results[1].status === 'rejected') errors.push('Groups failed to load');
+    if (results[2].status === 'rejected') errors.push('Accounts failed to load from database');
+    
+    if (errors.length > 0) {
+      setError(`Some data failed to load: ${errors.join(', ')}. Existing data is preserved. Refresh to retry.`);
+    } else {
+      setError('');
+    }
+    
+    setLoading(false);
+  };
+
+  const fetchGroups = async () => {
+    const response = await axios.get(`${API_URL}/groups`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
+    });
+    setGroups(response.data);
+  };
+
+  /**
+   * CRITICAL: Fetches accounts from the backend database.
+   * - Never resets accounts to [] on failure (preserves existing display)
+   * - Logs the count for debugging
+   * - Always uses authenticated API call — database is single source of truth
+   */
+  const fetchAccounts = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/accounts`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
+      });
+      const fetchedAccounts: InstagramAccount[] = response.data;
+      console.log(`[Accounts] Fetched ${fetchedAccounts.length} account(s) from database.`);
+      setAccounts(fetchedAccounts);
+    } catch (err: any) {
+      // CRITICAL: On fetch failure, preserve existing accounts — do NOT reset to []
+      // This ensures a transient network error doesn't make all accounts disappear
+      console.error('[Accounts] Failed to fetch accounts from API:', err?.response?.status, err?.message);
+      throw err; // re-throw so fetchInitialData can track the error
+    }
+  };
+
+  const fetchHistoryLogs = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/publish/history`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
+      });
+      setHistoryItems(response.data);
+    } catch (e) {
+      console.error('[Accounts] History log fetch failed:', e);
+    }
+  };
+
+  /**
+   * On-demand sync for a single Instagram account.
+   * Calls POST /accounts/{id}/sync which refreshes profile data from Instagram API.
+   * If token is expired, marks account as 'Token Expired' (never deletes it).
+   */
+  const handleSyncAccount = async (accId: number, username: string) => {
+    setSyncingAccId(accId);
+    setError('');
+    try {
+      const res = await axios.post(`${API_URL}/accounts/${accId}/sync`, {}, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
+      });
+      if (res.data.status === 'synced') {
+        setSuccessMsg(`@${username} synced: ${res.data.followers_count?.toLocaleString()} followers.`);
+      } else {
+        setSuccessMsg(`@${username}: ${res.data.message || 'Sync completed.'}`);
+      }
+      await fetchAccounts();
+    } catch (err: any) {
+      const detail = err.response?.data?.detail || `Sync failed for @${username}`;
+      setError(detail);
+      await fetchAccounts(); // Reload to show updated Token Expired status
+    } finally {
+      setSyncingAccId(null);
+    }
+  };
+
   const getGroupExpirySummary = (groupAccs: InstagramAccount[]) => {
     const activeAccs = groupAccs.filter(acc => acc.token_expiry);
     if (activeAccs.length === 0) return 'N/A';
@@ -167,62 +366,8 @@ export default function Accounts() {
     return `${formatted} (${diffDays} days left)`;
   };
 
-  const fetchProfile = async () => {
-    try {
-      const response = await axios.get(`${API_URL}/profile`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
-      });
-      setUserProfile(response.data);
-    } catch (err) {
-      console.error("Profile fetch error:", err);
-    }
-  };
 
-  useEffect(() => {
-    fetchInitialData();
-  }, []);
 
-  const fetchInitialData = async () => {
-    setLoading(true);
-    setError('');
-    try {
-      await Promise.all([
-        fetchProfile(),
-        fetchGroups(),
-        fetchAccounts(),
-        fetchHistoryLogs()
-      ]);
-    } catch (err: any) {
-      setError("Failed to fetch profiles and groups data.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchGroups = async () => {
-    const response = await axios.get(`${API_URL}/groups`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
-    });
-    setGroups(response.data);
-  };
-
-  const fetchAccounts = async () => {
-    const response = await axios.get(`${API_URL}/accounts`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
-    });
-    setAccounts(response.data);
-  };
-
-  const fetchHistoryLogs = async () => {
-    try {
-      const response = await axios.get(`${API_URL}/publish/history`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
-      });
-      setHistoryItems(response.data);
-    } catch (e) {
-      console.error(e);
-    }
-  };
 
   const getOwnershipBadge = (acc: InstagramAccount) => {
     if (!userProfile) return null;
@@ -714,6 +859,29 @@ export default function Accounts() {
 
   return (
     <div className="space-y-6">
+      {/* OAuth Callback Result Banner — shown when returning from Facebook OAuth */}
+      <AnimatePresence>
+        {oauthMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className={`p-4 rounded-2xl border flex items-start gap-3 ${
+              oauthMessage.type === 'success' 
+                ? 'bg-green-500/10 border-green-500/20 text-green-300'
+                : oauthMessage.type === 'warning'
+                ? 'bg-amber-500/10 border-amber-500/20 text-amber-300'
+                : 'bg-red-500/10 border-red-500/20 text-red-300'
+            }`}
+          >
+            <div className="flex-1 text-sm font-semibold">{oauthMessage.text}</div>
+            <button onClick={() => setOauthMessage(null)} className="text-slate-400 hover:text-slate-200 cursor-pointer shrink-0">
+              <X size={16} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-black font-outfit text-slate-100 mb-1.5 flex items-center gap-2">
@@ -1075,6 +1243,17 @@ export default function Accounts() {
                                       
                                       {checkPermission(acc) && (
                                         <div className="flex gap-1.5">
+                                          {/* Sync Now — refreshes profile data from Instagram API on-demand */}
+                                          <button
+                                            onClick={() => handleSyncAccount(acc.id, acc.instagram_username)}
+                                            disabled={syncingAccId === acc.id}
+                                            className="p-1.5 hover:bg-slate-900 text-cyan-400 rounded-md transition-colors cursor-pointer disabled:opacity-50"
+                                            title="Sync profile data from Instagram (refreshes follower count, checks token)"
+                                          >
+                                            {syncingAccId === acc.id 
+                                              ? <RefreshCw size={12} className="animate-spin" />
+                                              : <RefreshCw size={12} />}
+                                          </button>
                                           <button
                                             onClick={() => handleOpenEditDialog(acc)}
                                             className="p-1.5 hover:bg-slate-900 text-purple-400 rounded-md transition-colors cursor-pointer"
@@ -1134,13 +1313,20 @@ export default function Accounts() {
                                           {getAccountExpirySummary(acc.token_expiry)}
                                         </span>
                                       </div>
-                                      <div className="flex justify-between">
+                                      <div className="flex justify-between items-center">
                                         <span className="text-slate-500">Status:</span>
-                                        <span className={`px-1.5 rounded text-[9px] font-bold ${
-                                          acc.status === 'Connected' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
-                                        }`}>
-                                          {acc.status}
-                                        </span>
+                                        <div className="flex items-center gap-1.5">
+                                          {getTokenStatusBadge(acc)}
+                                          {acc.status === 'Token Expired' && (
+                                            <button
+                                              onClick={() => handleOpenEditDialog(acc)}
+                                              className="text-[9px] text-amber-400 hover:text-amber-300 underline cursor-pointer"
+                                              title="Update token to reconnect"
+                                            >
+                                              Reconnect
+                                            </button>
+                                          )}
+                                        </div>
                                       </div>
                                     </div>
 

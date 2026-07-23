@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     FACEBOOK_CLIENT_ID: str = ""
     FACEBOOK_CLIENT_SECRET: str = ""
     FACEBOOK_REDIRECT_URI: str = "https://thenexrevo.com/auth/facebook/callback"
+    
+    # Frontend URL — used by OAuth callback redirects (must match where the React app is deployed)
+    FRONTEND_URL: str = "http://localhost:3000"
 
     # AWS S3 Storage Settings
     AWS_ACCESS_KEY_ID: str = ""

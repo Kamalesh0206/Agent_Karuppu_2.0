@@ -8,13 +8,22 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import BrandLogo from './components/BrandLogo';
+import { API_URL } from './config.ts';
 
 // Axios Interceptor for token expiration handling
+// IMPORTANT: Only clears session JWT tokens, NOT Instagram account data or preferences.
+// Instagram accounts are stored in the database, NOT in localStorage.
 axios.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response && error.response.status === 401) {
-      localStorage.clear();
+      // Only remove the session JWT — never clear all localStorage
+      // This preserves the custom_api_url setting and any user preferences
+      localStorage.removeItem("token");
+      localStorage.removeItem("username");
+      localStorage.removeItem("role");
+      localStorage.removeItem("status");
+      // Note: custom_api_url is intentionally preserved so user doesn't need to reconfigure
       window.location.href = '/login';
     }
     return Promise.reject(error);
@@ -59,8 +68,25 @@ const DashboardLayout = () => {
   const username = localStorage.getItem("username") || "User";
   const role = localStorage.getItem("role") || "User";
 
-  const handleLogout = () => {
-    localStorage.clear();
+  const handleLogout = async () => {
+    // Call backend to revoke the JWT token server-side
+    // This ONLY invalidates the session JWT — Instagram accounts remain in the database permanently
+    const token = localStorage.getItem("token");
+    if (token) {
+      try {
+        await axios.post(`${API_URL}/logout`, {}, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      } catch (err) {
+        // Even if logout API fails, clear local session
+        console.warn("[Logout] Backend logout call failed, clearing local session anyway:", err);
+      }
+    }
+    // Only remove session tokens — never wipe Instagram account data or preferences
+    localStorage.removeItem("token");
+    localStorage.removeItem("username");
+    localStorage.removeItem("role");
+    localStorage.removeItem("status");
     navigate("/login");
   };
 
