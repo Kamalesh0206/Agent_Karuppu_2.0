@@ -53,12 +53,9 @@ app = FastAPI(
 
 # CORS Configuration
 allowed_origins_list = [
-    "https://agent-karuppu-2-0-2.onrender.com",
     "https://thenexrevo.com",
     "https://www.thenexrevo.com",
     "https://api.thenexrevo.com",
-    "https://agentkaruppu.netlify.app",
-    "https://agent-karuppu.netlify.app",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
@@ -70,7 +67,7 @@ allowed_origins_list = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins_list,
-    allow_origin_regex=r"https://.*(thenexrevo\.com|netlify\.app|onrender\.com)",
+    allow_origin_regex=r"https://.*thenexrevo\.com",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -215,7 +212,7 @@ def startup_db_setup():
 
     db = SessionLocal()
     try:
-        super_admin_email = "agentkaruppuadmin@gmail.com"
+        super_admin_email = "admin@thenexrevo.com"
         admin = db.query(User).filter(User.email == super_admin_email).first()
         if not admin:
             admin_user = User(
