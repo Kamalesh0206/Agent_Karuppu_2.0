@@ -9,11 +9,9 @@ const sanitizeStoredApiUrl = () => {
       const lower = stored.toLowerCase().trim();
       if (
         lower.includes('netlify') || 
-        lower.includes('agentkaruppu') || 
-        lower.includes('onrender.com') ||
-        lower.includes('thenexrevo.com') && !lower.includes('api.thenexrevo.com')
+        lower.includes('agentkaruppu.netlify.app')
       ) {
-        console.log("[Config] Automatically purged legacy custom_api_url from localStorage:", stored);
+        console.log("[Config] Automatically purged legacy Netlify API URL from localStorage:", stored);
         localStorage.removeItem("custom_api_url");
       }
     }

@@ -3,15 +3,24 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from .config import settings
 
-if settings.DATABASE_URL.startswith("sqlite"):
+db_url = (settings.DATABASE_URL or "").strip()
+
+# Standardize SQLAlchemy PostgreSQL connection scheme (postgres:// -> postgresql://)
+if db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql://", 1)
+
+if db_url.startswith("sqlite"):
     engine = create_engine(
-        settings.DATABASE_URL,
+        db_url,
         connect_args={"check_same_thread": False, "timeout": 30}
     )
 else:
     engine = create_engine(
-        settings.DATABASE_URL,
-        pool_pre_ping=True
+        db_url,
+        pool_pre_ping=True,
+        pool_size=10,
+        max_overflow=20,
+        pool_recycle=300
     )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
