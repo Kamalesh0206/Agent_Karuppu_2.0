@@ -119,6 +119,17 @@ async def redis_listener():
 @app.on_event("startup")
 def startup_db_setup():
     print(f"Backend Broker:\n{settings.REDIS_URL}")
+    if settings.DATABASE_URL.startswith("sqlite"):
+        logger.warning(
+            "\n"
+            "====================================================================================\n"
+            "⚠️  WARNING: SQLite database configured in config / environment URL!\n"
+            "   SQLite database file is EPHEMERAL inside Docker/Render container filesystems.\n"
+            "   All user profiles, settings, and linked accounts WILL BE LOST on container rebuilds,\n"
+            "   server restarts, deployments, or migrations.\n"
+            "   Please configure a persistent PostgreSQL DATABASE_URL for production deployment.\n"
+            "====================================================================================\n"
+        )
     Base.metadata.create_all(bind=engine)
     from sqlalchemy import text
     db_alter = SessionLocal()
@@ -3016,6 +3027,7 @@ def get_admin_users_stats(
     approved = db.query(User).filter(User.status == "Approved").count()
     disabled = db.query(User).filter(User.status == "Disabled").count()
     suspended = db.query(User).filter(User.status == "Suspended").count()
+    deleted = db.query(User).filter((User.is_deleted == True) | (User.status == "Deactivated")).count()
     admins = db.query(User).filter(User.role.in_(["Super Admin", "Admin"])).count()
     return {
         "total": total,
@@ -3023,6 +3035,7 @@ def get_admin_users_stats(
         "approved": approved,
         "disabled": disabled,
         "suspended": suspended,
+        "deleted": deleted,
         "admins": admins
     }
 
