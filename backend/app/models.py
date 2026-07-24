@@ -80,6 +80,11 @@ class InstagramAccount(Base):
     last_modified_by = Column(String, nullable=True)
     last_modified_at = Column(DateTime, nullable=True)
     
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
+    deleted_by = Column(Integer, nullable=True)
+    deletion_reason = Column(String, nullable=True)
+
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 

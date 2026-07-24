@@ -150,7 +150,11 @@ def startup_db_setup():
         ("created_by", "VARCHAR(255)"),
         ("updated_by", "VARCHAR(255)"),
         ("last_modified_by", "VARCHAR(255)"),
-        ("last_modified_at", "TIMESTAMP")
+        ("last_modified_at", "TIMESTAMP"),
+        ("is_deleted", "BOOLEAN DEFAULT 0"),
+        ("deleted_at", "TIMESTAMP"),
+        ("deleted_by", "INTEGER"),
+        ("deletion_reason", "VARCHAR(500)")
     ]
     for col_name, col_type in new_acc_cols:
         db_alter = SessionLocal()
@@ -926,26 +930,33 @@ def check_account_modification_permission(account: InstagramAccount, user: User)
 @app.get("/accounts", response_model=List[InstagramAccountResponse])
 @app.get("/api/accounts", response_model=List[InstagramAccountResponse])
 @app.get("/instagram/accounts", response_model=List[InstagramAccountResponse])
-def get_accounts(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def get_accounts(
+    include_deleted: bool = False,
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user)
+):
     """
     Fetch all Instagram accounts from the database.
     
     CRITICAL DESIGN DECISIONS:
     - Database is the single source of truth. Never resets on page refresh or re-login.
-    - Does NOT call Instagram API on every load (removed blocking API calls).
     - Token status is determined from stored token_expiry date in DB.
     - Expired tokens mark account as 'Token Expired' — never delete the account.
+    - Soft-deleted accounts are excluded by default unless include_deleted=True.
     - Accounts persist across logout/login cycles permanently.
     """
     now = datetime.utcnow()
-    accounts = db.query(InstagramAccount).all()
-    logger.info(f"[Account Fetch] User {current_user.username} fetching accounts. Found {len(accounts)} total accounts in DB.")
+    query = db.query(InstagramAccount)
+    if not include_deleted:
+        query = query.filter(InstagramAccount.is_deleted == False)
+    
+    accounts = query.all()
+    logger.info(f"[Account Fetch] User {current_user.username} fetching accounts (include_deleted={include_deleted}). Found {len(accounts)} accounts in DB.")
     
     # Auto-update token expiry status from DB date (no Instagram API call needed)
     status_updated = False
     for acc in accounts:
-        if acc.token_expiry and acc.token_expiry < now and acc.status == "Connected":
-            # Mark as expired instead of hiding/deleting the account
+        if not acc.is_deleted and acc.token_expiry and acc.token_expiry < now and acc.status == "Connected":
             acc.status = "Token Expired"
             acc.last_modified_at = now
             status_updated = True
@@ -963,7 +974,7 @@ def get_accounts(db: Session = Depends(get_db), current_user: User = Depends(get
     
     results = []
     for acc in accounts:
-        is_owner = acc.owner_id == current_user.id
+        is_owner = acc.owner_id == current_user.id or acc.user_id == current_user.id
         acc_dict = {
             "id": acc.id,
             "user_id": acc.user_id,
@@ -978,6 +989,10 @@ def get_accounts(db: Session = Depends(get_db), current_user: User = Depends(get
             "owner_name": acc.owner_name or (acc.user.full_name if acc.user else "System"),
             "linked_by": acc.linked_by,
             "linked_at": acc.linked_at,
+            "is_deleted": acc.is_deleted,
+            "deleted_at": acc.deleted_at,
+            "deleted_by": acc.deleted_by,
+            "deletion_reason": acc.deletion_reason,
             "created_at": acc.created_at,
             "updated_at": acc.updated_at,
             # Sensitive fields sanitized for non-owners/non-admins
@@ -1160,7 +1175,65 @@ def update_account_credentials(
 
 @app.delete("/accounts/{id}")
 @app.delete("/api/accounts/{id}")
-def delete_account(id: int, request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+@app.post("/accounts/{id}/delete")
+@app.post("/api/accounts/{id}/delete")
+def delete_account(
+    id: int, 
+    request: Request, 
+    delete_data: Optional[InstagramAccountDeleteRequest] = None,
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user)
+):
+    acc = db.query(InstagramAccount).filter(InstagramAccount.id == id).first()
+    if not acc:
+        raise HTTPException(status_code=404, detail="Instagram profile not found.")
+    
+    # Permission verification (rejects unauthorized users with HTTP 403)
+    check_account_modification_permission(acc, current_user)
+
+    username = acc.instagram_username or "Unknown"
+    reason = delete_data.deletion_reason if delete_data else None
+    
+    # Perform Soft Delete (preserve all publishing history, media records, and token history in DB)
+    acc.is_deleted = True
+    acc.deleted_at = datetime.utcnow()
+    acc.deleted_by = current_user.id
+    acc.deletion_reason = reason
+    acc.status = "Disconnected"
+    acc.last_modified_by = current_user.username
+    acc.last_modified_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(acc)
+
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    is_admin = current_user.role in ["Super Admin", "Admin"]
+    actor_type = "Admin" if is_admin else "Owner"
+    del_desc = f"{actor_type} '{current_user.username}' soft-deleted Instagram profile @{username} (ID: {acc.id}). Reason: {reason or 'Explicit User Disconnection'}. All publishing history and settings preserved."
+    
+    create_audit_log(
+        db=db,
+        action="Account Removal",
+        description=del_desc,
+        user_id=current_user.id,
+        ip_address=client_ip
+    )
+    logger.info(f"[Account Soft Delete] {del_desc} | IP: {client_ip}")
+
+    return {
+        "message": f"Instagram profile @{username} disconnected and soft-deleted successfully.",
+        "status": "Disconnected",
+        "is_deleted": True
+    }
+
+@app.post("/accounts/{id}/restore", response_model=InstagramAccountResponse)
+@app.post("/api/accounts/{id}/restore", response_model=InstagramAccountResponse)
+def restore_account(
+    id: int, 
+    request: Request, 
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user)
+):
     acc = db.query(InstagramAccount).filter(InstagramAccount.id == id).first()
     if not acc:
         raise HTTPException(status_code=404, detail="Instagram profile not found.")
@@ -1168,22 +1241,90 @@ def delete_account(id: int, request: Request, db: Session = Depends(get_db), cur
     # Permission verification
     check_account_modification_permission(acc, current_user)
 
-    username = acc.instagram_username
-    db.delete(acc)
+    username = acc.instagram_username or "Unknown"
+    
+    # Perform Restoration
+    acc.is_deleted = False
+    acc.deleted_at = None
+    acc.deleted_by = None
+    acc.deletion_reason = None
+    acc.status = "Connected"
+    acc.last_modified_by = current_user.username
+    acc.last_modified_at = datetime.utcnow()
+    
     db.commit()
+    db.refresh(acc)
 
     client_ip = request.client.host if request.client else "127.0.0.1"
     is_admin = current_user.role in ["Super Admin", "Admin"]
-    del_desc = f"Admin deleted @{username}" if is_admin else f"Owner deleted @{username}"
+    actor_type = "Admin" if is_admin else "Owner"
+    restore_desc = f"{actor_type} '{current_user.username}' restored soft-deleted Instagram profile @{username} (ID: {acc.id}). Status restored to Connected."
     
     create_audit_log(
         db=db,
-        action="User Action",
-        description=del_desc,
+        action="Account Restoration",
+        description=restore_desc,
         user_id=current_user.id,
         ip_address=client_ip
     )
-    return {"detail": "Instagram profile successfully disconnected."}
+    logger.info(f"[Account Restoration] {restore_desc} | IP: {client_ip}")
+
+    return acc
+
+@app.post("/accounts/{id}/reconnect", response_model=InstagramAccountResponse)
+@app.post("/api/accounts/{id}/reconnect", response_model=InstagramAccountResponse)
+def reconnect_account(
+    id: int,
+    acc_data: InstagramAccountUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    acc = db.query(InstagramAccount).filter(InstagramAccount.id == id).first()
+    if not acc:
+        raise HTTPException(status_code=404, detail="Instagram profile not found.")
+    
+    # Permission verification
+    check_account_modification_permission(acc, current_user)
+    
+    if not acc_data.access_token:
+        raise HTTPException(status_code=400, detail="access_token is required for reconnection.")
+        
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    
+    result = InstagramClient.verify_and_resolve_account(
+        username=acc.instagram_username,
+        access_token=acc_data.access_token,
+        facebook_page_id=acc_data.facebook_page_id or acc.facebook_page_id
+    )
+    if result["status"] == "rejected":
+        raise HTTPException(status_code=400, detail=result.get("reason", "Token verification failed"))
+        
+    acc.page_access_token = encrypt_token(acc_data.access_token)
+    acc.instagram_business_id = result["instagram_account_id"]
+    acc.instagram_username = result["username"]
+    acc.profile_picture = result.get("profile_picture") or acc.profile_picture
+    acc.business_name = result.get("business_name") or acc.business_name
+    acc.followers_count = result.get("followers_count", acc.followers_count)
+    acc.token_expiry = result["token_expiry_time"]
+    acc.status = "Connected"
+    acc.is_deleted = False
+    acc.deleted_at = None
+    acc.deleted_by = None
+    acc.last_modified_by = current_user.username
+    acc.last_modified_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(acc)
+
+    create_audit_log(
+        db=db,
+        action="Account Reconnect",
+        description=f"User '{current_user.username}' reconnected token for @{acc.instagram_username} (ID: {acc.id}). Status: Connected.",
+        user_id=current_user.id,
+        ip_address=client_ip
+    )
+    return acc
 
 @app.post("/accounts/{id}/sync")
 @app.post("/api/accounts/{id}/sync")

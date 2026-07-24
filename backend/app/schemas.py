@@ -114,12 +114,19 @@ class InstagramAccountResponse(BaseModel):
     updated_by: Optional[str] = None
     last_modified_by: Optional[str] = None
     last_modified_at: Optional[datetime] = None
+    is_deleted: bool = False
+    deleted_at: Optional[datetime] = None
+    deleted_by: Optional[int] = None
+    deletion_reason: Optional[str] = None
 
     created_at: datetime
     updated_at: datetime
 
     class Config:
         from_attributes = True
+
+class InstagramAccountDeleteRequest(BaseModel):
+    deletion_reason: Optional[str] = None
 
 class TransferOwnerPayload(BaseModel):
     new_owner_id: int

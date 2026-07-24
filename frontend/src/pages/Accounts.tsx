@@ -5,7 +5,7 @@ import { API_URL } from '../config.ts';
 import { 
   Key, Trash2, AlertTriangle, Plus, X, Folder, Edit3, ChevronDown, ChevronRight, 
   Settings as SettingsIcon, List, FileText, CheckCircle2, RefreshCw, EyeOff, Globe, Move, Link as LinkIcon, ShieldAlert,
-  BarChart3, Users, Search, Filter, User as UserIcon, Lock, Shield, Share2, ExternalLink, Send, Zap, WifiOff, Clock
+  BarChart3, Users, Search, Filter, User as UserIcon, Lock, Shield, Share2, ExternalLink, Send, Zap, WifiOff, Clock, RotateCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import GroupTokenManager from '../components/GroupTokenManager';
@@ -30,6 +30,10 @@ interface InstagramAccount {
   owner_name: string | null;
   linked_by: string | null;
   linked_at: string | null;
+  is_deleted?: boolean;
+  deleted_at?: string | null;
+  deleted_by?: number | null;
+  deletion_reason?: string | null;
 }
 
 interface Group {
@@ -837,12 +841,34 @@ export default function Accounts() {
       await axios.delete(`${API_URL}/accounts/${deleteId}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
       });
-      setSuccessMsg("Account successfully disconnected.");
+      setSuccessMsg("Account successfully disconnected and soft-deleted. All publishing records preserved.");
       await Promise.all([fetchGroups(), fetchAccounts()]);
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to disconnect account.");
+      if (err.response?.status === 403) {
+        setError("Only the account owner or an administrator can modify or disconnect this Instagram account.");
+      } else {
+        setError(err.response?.data?.detail || "Failed to disconnect account.");
+      }
     } finally {
       setDeleteId(null);
+    }
+  };
+
+  const handleRestoreAccount = async (accountId: number) => {
+    try {
+      setError('');
+      setSuccessMsg('');
+      await axios.post(`${API_URL}/accounts/${accountId}/restore`, {}, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
+      });
+      setSuccessMsg("Instagram profile successfully restored!");
+      await Promise.all([fetchGroups(), fetchAccounts()]);
+    } catch (err: any) {
+      if (err.response?.status === 403) {
+        setError("Only the account owner or an administrator can restore this Instagram account.");
+      } else {
+        setError(err.response?.data?.detail || "Failed to restore Instagram account.");
+      }
     }
   };
 
@@ -1956,24 +1982,27 @@ export default function Accounts() {
               exit={{ scale: 0.95, opacity: 0 }}
               className="glass-panel w-full max-w-sm rounded-2xl border border-slate-800 shadow-2xl relative overflow-hidden flex flex-col z-10"
             >
-              <div className="px-6 py-4 border-b border-slate-900">
-                <h3 className="text-lg font-bold font-outfit text-slate-100">Disconnect profile feed?</h3>
+              <div className="px-6 py-4 border-b border-slate-900 flex items-center gap-2 text-amber-400">
+                <AlertTriangle size={18} />
+                <h3 className="text-base font-bold font-outfit text-slate-100">Confirm Soft Disconnect</h3>
               </div>
               <div className="p-6">
-                <p className="text-sm text-slate-400">Are you sure you want to disconnect this Instagram account? You will not be able to publish content to it until you re-authenticate.</p>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Are you sure you want to disconnect this Instagram account? The profile will be soft-deleted and marked as Disconnected. All associated publishing history, scheduled posts, media files, and settings will remain safely preserved in the database.
+                </p>
               </div>
               <div className="px-6 py-4 bg-slate-900/40 border-t border-slate-900 flex justify-end gap-2">
                 <button
                   onClick={() => setDeleteId(null)}
-                  className="px-4 py-2 border border-slate-800 hover:bg-slate-900 text-slate-300 font-semibold rounded-xl text-sm transition-colors cursor-pointer"
+                  className="px-4 py-2 border border-slate-800 hover:bg-slate-900 text-slate-300 font-semibold rounded-xl text-xs transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleDelete}
-                  className="px-5 py-2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-sm transition-all cursor-pointer shadow-md hover:shadow-lg"
+                  className="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs transition-all cursor-pointer shadow-md hover:shadow-lg"
                 >
-                  Disconnect
+                  Confirm Soft Delete
                 </button>
               </div>
             </motion.div>
