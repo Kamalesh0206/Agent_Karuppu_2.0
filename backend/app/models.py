@@ -33,6 +33,11 @@ class User(Base):
     mobile_verified = Column(Boolean, default=True, nullable=False)
     publishing_permission = Column(Boolean, default=True, nullable=False)
 
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
+    deleted_by = Column(Integer, nullable=True)
+    deletion_reason = Column(String, nullable=True)
+
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 

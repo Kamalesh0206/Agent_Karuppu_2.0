@@ -195,7 +195,11 @@ def startup_db_setup():
         ("disabled_at", "TIMESTAMP"),
         ("suspended_at", "TIMESTAMP"),
         ("last_login", "TIMESTAMP"),
-        ("is_active", "BOOLEAN DEFAULT 1")
+        ("is_active", "BOOLEAN DEFAULT 1"),
+        ("is_deleted", "BOOLEAN DEFAULT 0"),
+        ("deleted_at", "TIMESTAMP"),
+        ("deleted_by", "INTEGER"),
+        ("deletion_reason", "VARCHAR(500)")
     ]
     for col_name, col_type in new_user_cols:
         db_alter = SessionLocal()
@@ -275,10 +279,10 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     if not db_token:
         raise credentials_exception
 
-    if user.status == "Deactivated":
+    if getattr(user, 'is_deleted', False) or user.status in ["Deactivated", "Soft Deleted"] or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your account has been deactivated."
+            detail="Your account has been deleted or deactivated. Please contact an administrator."
         )
     return user
 
@@ -448,7 +452,13 @@ def login(login_data: UserLogin, request: Request, db: Session = Depends(get_db)
             detail="Incorrect username/email or password"
         )
 
-    if user.status == "Pending Approval":
+    if getattr(user, 'is_deleted', False) or user.status in ["Deactivated", "Soft Deleted"]:
+        logger.warning(f"[Auth Login Blocked] User: {user.username} | Account Soft-Deleted/Deactivated")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account has been deleted or deactivated. Please contact an administrator."
+        )
+    elif user.status == "Pending Approval":
         logger.warning(f"[Auth Login Blocked] User: {user.username} | Account Pending Approval")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -3070,9 +3080,15 @@ def suspend_user(
     return user
 
 @app.delete("/admin/users/{user_id}")
+@app.delete("/api/admin/users/{user_id}")
+@app.delete("/users/{user_id}")
+@app.delete("/api/users/{user_id}")
+@app.post("/admin/users/{user_id}/delete")
+@app.post("/api/admin/users/{user_id}/delete")
 def delete_user(
     user_id: int,
     request: Request,
+    delete_data: Optional[UserDeleteRequest] = None,
     db: Session = Depends(get_db),
     admin_user: User = Depends(get_admin_user)
 ):
@@ -3081,19 +3097,73 @@ def delete_user(
         raise HTTPException(status_code=404, detail="User not found.")
     if user.id == admin_user.id:
         raise HTTPException(status_code=400, detail="You cannot delete your own account.")
-    username = user.username
-    db.delete(user)
+    
+    reason = delete_data.deletion_reason if delete_data else None
+    
+    # Perform Soft Delete (preserve all user records & linked data)
+    user.is_deleted = True
+    user.deleted_at = datetime.utcnow()
+    user.deleted_by = admin_user.id
+    user.deletion_reason = reason
+    user.status = "Deactivated"
+    user.approval_status = "Deactivated"
+    user.is_active = False
+    
+    # Revoke access tokens for security
+    db.query(AccessToken).filter(AccessToken.user_id == user_id).update({"is_revoked": True})
     db.commit()
+    db.refresh(user)
     
     client_ip = request.client.host if request.client else "127.0.0.1"
     create_audit_log(
         db=db,
-        action="User Action",
-        description=f"Admin {admin_user.username} deleted user {username}",
+        action="User Deletion",
+        description=f"Admin '{admin_user.username}' soft-deleted user '{user.username}' (ID: {user.id}). Reason: {reason or 'Administrative Soft Delete'}. User records, workspaces, and Instagram accounts preserved.",
         user_id=admin_user.id,
         ip_address=client_ip
     )
-    return {"message": "User deleted successfully."}
+    logger.info(f"[User Soft Delete] Admin '{admin_user.username}' soft-deleted user '{user.username}' (ID: {user.id}) | IP: {client_ip}")
+    return {
+        "message": f"User '{user.username}' soft-deleted successfully.",
+        "status": "Deactivated",
+        "is_deleted": True
+    }
+
+@app.post("/admin/users/{user_id}/restore", response_model=UserResponse)
+@app.post("/api/admin/users/{user_id}/restore", response_model=UserResponse)
+@app.post("/users/{user_id}/restore", response_model=UserResponse)
+@app.post("/api/users/{user_id}/restore", response_model=UserResponse)
+def restore_user(
+    user_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user)
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    # Perform Restoration
+    user.is_deleted = False
+    user.deleted_at = None
+    user.deleted_by = None
+    user.deletion_reason = None
+    user.status = "Approved"
+    user.approval_status = "Approved"
+    user.is_active = True
+    db.commit()
+    db.refresh(user)
+    
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    create_audit_log(
+        db=db,
+        action="User Restoration",
+        description=f"Admin '{admin_user.username}' restored soft-deleted user '{user.username}' (ID: {user.id}). Roles and permissions reactivated.",
+        user_id=admin_user.id,
+        ip_address=client_ip
+    )
+    logger.info(f"[User Restoration] Admin '{admin_user.username}' restored user '{user.username}' (ID: {user.id}) | IP: {client_ip}")
+    return user
 
 @app.post("/admin/users/{user_id}/reset-password")
 def reset_user_password(

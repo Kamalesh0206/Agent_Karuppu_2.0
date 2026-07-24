@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { 
   Users, UserCheck, UserX, Ban, Clock, ShieldAlert, 
-  Search, Filter, Edit, Trash2, Key, Eye, X, ChevronRight, AlertCircle 
+  Search, Filter, Edit, Trash2, Key, Eye, X, ChevronRight, AlertCircle, RotateCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { API_URL } from '../config';
+import { API_URL } from '../config.ts';
 
 interface UserDetail {
   id: number;
@@ -25,6 +25,10 @@ interface UserDetail {
   suspended_at: string | null;
   last_login: string | null;
   is_active: boolean;
+  is_deleted?: boolean;
+  deleted_at?: string | null;
+  deleted_by?: number | null;
+  deletion_reason?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -35,13 +39,14 @@ interface Stats {
   approved: number;
   disabled: number;
   suspended: number;
+  deleted?: number;
   admins: number;
 }
 
 export default function UserManagement() {
   const [users, setUsers] = useState<UserDetail[]>([]);
   const [stats, setStats] = useState<Stats>({
-    total: 0, pending: 0, approved: 0, disabled: 0, suspended: 0, admins: 0
+    total: 0, pending: 0, approved: 0, disabled: 0, suspended: 0, deleted: 0, admins: 0
   });
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -111,6 +116,8 @@ export default function UserManagement() {
         await axios.post(`${API_URL}/admin/users/${id}/suspend`, {}, { headers });
       } else if (action === 'delete') {
         await axios.delete(`${API_URL}/admin/users/${id}`, { headers });
+      } else if (action === 'restore') {
+        await axios.post(`${API_URL}/admin/users/${id}/restore`, {}, { headers });
       } else if (action === 'reset-password') {
         await axios.post(`${API_URL}/admin/users/${id}/reset-password`, payload, { headers });
       }
@@ -123,7 +130,7 @@ export default function UserManagement() {
   const handleBulkAction = async (action: string) => {
     if (selectedUserIds.length === 0) return;
     if (action === 'delete') {
-      if (!confirm("Are you sure you want to delete all selected users? This cannot be undone.")) return;
+      if (!confirm("Are you sure you want to soft-delete all selected users? Users will be deactivated, preserving all linked data.")) return;
     }
     setLoading(true);
     for (const id of selectedUserIds) {
@@ -159,7 +166,9 @@ export default function UserManagement() {
       'Approved': { bg: 'bg-green-500/10 border-green-500/20', text: 'text-green-400', icon: <UserCheck size={12} /> },
       'Rejected': { bg: 'bg-red-500/10 border-red-500/20', text: 'text-red-400', icon: <UserX size={12} /> },
       'Disabled': { bg: 'bg-slate-500/10 border-slate-500/20', text: 'text-slate-400', icon: <Ban size={12} /> },
-      'Suspended': { bg: 'bg-orange-500/10 border-orange-500/20', text: 'text-orange-400', icon: <ShieldAlert size={12} /> }
+      'Suspended': { bg: 'bg-orange-500/10 border-orange-500/20', text: 'text-orange-400', icon: <ShieldAlert size={12} /> },
+      'Deactivated': { bg: 'bg-amber-500/10 border-amber-500/20', text: 'text-amber-400', icon: <RotateCcw size={12} /> },
+      'Soft Deleted': { bg: 'bg-amber-500/10 border-amber-500/20', text: 'text-amber-400', icon: <RotateCcw size={12} /> }
     };
     const b = badges[status] || badges['Pending Approval'];
     return (
@@ -230,6 +239,7 @@ export default function UserManagement() {
               <option value="Rejected">Rejected</option>
               <option value="Disabled">Disabled</option>
               <option value="Suspended">Suspended</option>
+              <option value="Deactivated">Deactivated (Soft Deleted)</option>
             </select>
             
             <select
@@ -424,10 +434,21 @@ export default function UserManagement() {
                           </button>
                         )}
 
-                        {user.role !== 'Super Admin' && (
+                        {(user.status === 'Deactivated' || user.status === 'Soft Deleted' || user.is_deleted) && (
+                          <button
+                            onClick={() => handleAction('restore', user.id)}
+                            title="Restore Soft-Deleted User Account"
+                            className="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 hover:bg-amber-500/20 transition-all flex items-center gap-1 font-bold text-[10px]"
+                          >
+                            <RotateCcw size={14} />
+                            <span>Restore</span>
+                          </button>
+                        )}
+
+                        {user.role !== 'Super Admin' && user.status !== 'Deactivated' && !user.is_deleted && (
                           <button
                             onClick={() => setDeleteUserId(user.id)}
-                            title="Delete User"
+                            title="Soft Delete User"
                             className="p-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-all"
                           >
                             <Trash2 size={14} />
@@ -517,11 +538,13 @@ export default function UserManagement() {
       {deleteUserId !== null && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="w-full max-w-md glass-panel p-6 rounded-2xl border border-slate-800">
-            <div className="flex items-center gap-2.5 text-red-400 mb-3">
+            <div className="flex items-center gap-2.5 text-amber-400 mb-3">
               <AlertCircle size={20} />
-              <h3 className="text-base font-black text-slate-100">Permanent User Deletion</h3>
+              <h3 className="text-base font-black text-slate-100">Confirm Account Deactivation & Soft Delete</h3>
             </div>
-            <p className="text-slate-400 text-xs mb-4">Are you sure you want to permanently delete this user? This action cannot be undone and will delete all user configurations.</p>
+            <p className="text-slate-400 text-xs mb-4">
+              Are you sure you want to permanently delete this user account? The user account will be soft-deleted and deactivated, preserving all associated workspace data, Instagram accounts, and audit logs.
+            </p>
             <div className="flex items-center justify-end gap-2 text-xs">
               <button
                 onClick={() => setDeleteUserId(null)}
@@ -534,9 +557,9 @@ export default function UserManagement() {
                   handleAction('delete', deleteUserId);
                   setDeleteUserId(null);
                 }}
-                className="px-4 py-2 bg-red-500 text-slate-950 font-black rounded-xl hover:shadow-lg transition-all"
+                className="px-4 py-2 bg-amber-500 text-slate-950 font-black rounded-xl hover:shadow-lg transition-all"
               >
-                Delete Account
+                Confirm Soft Delete
               </button>
             </div>
           </motion.div>

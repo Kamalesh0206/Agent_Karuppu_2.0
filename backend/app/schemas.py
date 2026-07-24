@@ -35,11 +35,18 @@ class UserResponse(BaseModel):
     email_verified: bool
     mobile_verified: bool
     publishing_permission: bool
+    is_deleted: bool = False
+    deleted_at: Optional[datetime] = None
+    deleted_by: Optional[int] = None
+    deletion_reason: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
     class Config:
         from_attributes = True
+
+class UserDeleteRequest(BaseModel):
+    deletion_reason: Optional[str] = None
 
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None
