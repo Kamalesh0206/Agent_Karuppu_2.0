@@ -1806,6 +1806,7 @@ def publish_post(
         )
 
 @app.post("/publish/{id}/retry")
+@app.post("/api/publish/{id}/retry")
 def retry_failed_publish_item(id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     item = db.query(PublishingQueue).filter(PublishingQueue.id == id).first()
     if not item:
@@ -1824,10 +1825,14 @@ def retry_failed_publish_item(id: int, background_tasks: BackgroundTasks, db: Se
     return {"detail": "Retry enqueued successfully."}
 
 @app.get("/publish-history/{id}/logs", response_model=List[PublishingLogResponse])
+@app.get("/api/publish-history/{id}/logs", response_model=List[PublishingLogResponse])
+@app.get("/publish/{id}/logs", response_model=List[PublishingLogResponse])
+@app.get("/api/publish/{id}/logs", response_model=List[PublishingLogResponse])
 def get_publishing_item_logs(id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     return db.query(PublishingLog).filter(PublishingLog.queue_id == id).order_by(PublishingLog.timestamp.asc()).all()
 
 @app.get("/publish/status", response_model=List[PublishingQueueResponse])
+@app.get("/api/publish/status", response_model=List[PublishingQueueResponse])
 def get_publishing_status(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Retrieve outstanding queue logs."""
     return db.query(PublishingQueue).join(Post).filter(Post.user_id == current_user.id).order_by(PublishingQueue.id.desc()).all()
@@ -1851,6 +1856,7 @@ def get_audit_logs(db: Session = Depends(get_db), current_user: User = Depends(g
     return db.query(AuditLog).filter(AuditLog.user_id == current_user.id).order_by(AuditLog.created_at.desc()).all()
 
 @app.get("/publish/errors", response_model=List[PublishingLogResponse])
+@app.get("/api/publish/errors", response_model=List[PublishingLogResponse])
 def get_publishing_errors(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Retrieve error tracking metrics enqueued in PublishingLogs."""
     return db.query(PublishingLog).join(PublishingQueue).join(Post).filter(Post.user_id == current_user.id).order_by(PublishingLog.timestamp.desc()).all()

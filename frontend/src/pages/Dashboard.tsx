@@ -7,6 +7,7 @@ import {
   ChevronUp, ChevronDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import PublishingStatusPanel from '../components/PublishingStatusPanel.tsx';
 
 interface InstagramAccount {
   id: number;
@@ -915,133 +916,9 @@ export default function Dashboard() {
 
       </div>
 
-      {/* Right Column: Status Panel & Collapsible Meta API Error Log */}
+      {/* Right Column: Enhanced Publishing Status Panel */}
       <div className="space-y-6">
-        {/* Live Publishing Status Panel */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold font-outfit text-slate-200">Current Publishing Status</h2>
-            <span className="flex items-center gap-1.5 text-xs text-purple-400 font-semibold">
-              <span className="w-2 h-2 rounded-full bg-purple-500 animate-ping" />
-              <span>Real-Time</span>
-            </span>
-          </div>
-
-          {activeQueue.length === 0 ? (
-            <div className="glass-panel p-6 text-center rounded-2xl border border-slate-900 text-slate-500 text-sm">
-              No active publishing jobs running.
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {activeQueue.map((item) => (
-                <div key={item.id} className="glass-panel p-5 rounded-2xl border border-slate-900 shadow-xl space-y-4">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <h4 className="text-sm font-bold text-slate-200">@{item.account.instagram_username}</h4>
-                      <p className="text-[10px] text-slate-500 font-medium">Step: {item.current_step || "Queuing Job"}</p>
-                    </div>
-                    <span className="text-xs font-bold text-purple-400 bg-purple-500/10 border border-purple-500/20 px-2 py-0.5 rounded">
-                      {getFriendlyStatus(item.status)}
-                    </span>
-                  </div>
-
-                  {/* Progress Bar */}
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between text-xs text-slate-400 font-medium">
-                      <span>Progress</span>
-                      <span>{item.progress_percent}%</span>
-                    </div>
-                    <div className="w-full h-2 rounded-full bg-slate-900 overflow-hidden border border-slate-900">
-                      <motion.div 
-                        initial={{ width: 0 }}
-                        animate={{ width: `${item.progress_percent}%` }}
-                        className="h-full bg-gradient-to-r from-purple-500 to-pink-500 animate-pulse" 
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-4 text-center text-xs border-t border-slate-900 pt-3">
-                    <div>
-                      <span className="block text-slate-500 text-[10px] uppercase font-bold">Elapsed</span>
-                      <span className="font-semibold text-slate-300 font-mono">{item.elapsed_time}s</span>
-                    </div>
-                    <div>
-                      <span className="block text-slate-500 text-[10px] uppercase font-bold">Retries</span>
-                      <span className="font-semibold text-slate-300 font-mono">{item.retry_count}/3</span>
-                    </div>
-                    <div>
-                      <span className="block text-slate-500 text-[10px] uppercase font-bold">Queue ID</span>
-                      <span className="font-semibold text-slate-300 font-mono">#{item.id}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Error logs table */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold font-outfit text-slate-200">Meta API Error Log</h2>
-            <div className="flex items-center gap-2">
-              <button 
-                onClick={downloadJSON}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-800 hover:bg-slate-900 text-xs font-semibold text-slate-400 hover:text-slate-200 transition-all cursor-pointer"
-              >
-                <Download size={12} />
-                <span>JSON</span>
-              </button>
-              <button 
-                onClick={downloadCSV}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-800 hover:bg-slate-900 text-xs font-semibold text-slate-400 hover:text-slate-200 transition-all cursor-pointer"
-              >
-                <Download size={12} />
-                <span>CSV</span>
-              </button>
-              <button 
-                onClick={() => setErrorLogExpanded(!errorLogExpanded)}
-                className="flex items-center justify-center p-1.5 rounded-lg border border-slate-800 hover:bg-slate-900 hover:text-slate-200 text-slate-400 transition-all cursor-pointer"
-                title={errorLogExpanded ? "Collapse Logs" : "Expand Logs"}
-              >
-                {errorLogExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-              </button>
-            </div>
-          </div>
-
-          {errorLogExpanded && (
-            errorLogs.length === 0 ? (
-              <div className="glass-panel p-6 text-center rounded-2xl border border-slate-900 text-slate-500 text-sm">
-                No Meta Graph API errors recorded.
-              </div>
-            ) : (
-              <div className="glass-panel rounded-2xl border border-slate-900 overflow-hidden divide-y divide-slate-900 shadow-xl max-h-96 overflow-y-auto">
-                {errorLogs.map((log) => (
-                  <div key={log.id} className="p-4 space-y-2 hover:bg-slate-900/10 transition-colors">
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="px-2 py-0.5 rounded bg-red-500/10 border border-red-500/20 text-red-400 font-bold">
-                        HTTP {log.http_status || "Exception"}
-                      </span>
-                      <span className="text-slate-500">{new Date(log.timestamp).toLocaleTimeString()}</span>
-                    </div>
-                    <p className="text-xs text-slate-300 font-medium">{log.message}</p>
-                    <p className="text-[10px] text-slate-500 font-mono truncate">{log.request_url}</p>
-                    <div className="flex items-center justify-between pt-2 border-t border-slate-900/50">
-                      <span className="text-[10px] text-slate-500 font-mono">Trace: {log.fbtrace_id || "N/A"}</span>
-                      <button
-                        onClick={() => copyErrorToClipboard(log)}
-                        className="flex items-center gap-1 text-[10px] text-purple-400 hover:text-purple-300 font-semibold"
-                      >
-                        <Copy size={10} />
-                        <span>Copy JSON</span>
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )
-          )}
-        </div>
+        <PublishingStatusPanel onQueueUpdated={fetchStatusAndLogs} />
       </div>
     </div>
   );
